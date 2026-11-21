@@ -1,0 +1,6 @@
+{
+  "name": "دراجتي — سوق الدراجات وقطع الغيار في العراق",
+  "description": "تطبيق دراجتي لبيع وشراء الدراجات النارية والهوائية والكهربائية والسكوترات وقطع الغيار والإكسسوارات في جميع محافظات العراق.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
