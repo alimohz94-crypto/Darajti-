@@ -1,7 +1,14 @@
 import Database from 'better-sqlite3';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { hashPassword, sha256 } from './securityCrypto.ts';
+export {
+  generateOwnerCode,
+  generateToken,
+  hashPassword,
+  sha256,
+  verifyPassword,
+} from './securityCrypto.ts';
 
 const dbPath = path.resolve(process.env.DATABASE_PATH || './data/darajati.db');
 fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o750 });
@@ -14,39 +21,6 @@ try {
 }
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
-
-export function sha256(value: string): string {
-  return crypto.createHash('sha256').update(value).digest('hex');
-}
-
-export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${derived}`;
-}
-
-export function verifyPassword(password: string, storedHash: string): boolean {
-  const [salt, key] = storedHash.split(':');
-  if (!salt || !key) return false;
-  const derived = crypto.scryptSync(password, salt, 64);
-  const keyBuf = Buffer.from(key, 'hex');
-  if (derived.length !== keyBuf.length) return false;
-  return crypto.timingSafeEqual(derived, keyBuf);
-}
-
-export function generateToken(bytes = 24): string {
-  return crypto.randomBytes(bytes).toString('hex');
-}
-
-export function generateOwnerCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  const bytes = crypto.randomBytes(8);
-  for (let i = 0; i < 8; i++) {
-    code += chars[bytes[i] % chars.length];
-  }
-  return code;
-}
 
 export function initDatabase(): void {
   db.exec(`
@@ -80,6 +54,7 @@ export function initDatabase(): void {
       video_url TEXT,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'sold', 'rejected')),
       is_demo INTEGER NOT NULL DEFAULT 0,
+      is_hidden INTEGER NOT NULL DEFAULT 0,
       owner_token_hash TEXT NOT NULL,
       owner_code_hash TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -112,6 +87,7 @@ export function initDatabase(): void {
       subtitle TEXT NOT NULL DEFAULT '',
       image_url TEXT NOT NULL,
       link_category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      link_url TEXT NOT NULL DEFAULT '',
       sort_order INTEGER NOT NULL DEFAULT 0,
       is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -241,50 +217,22 @@ export function initDatabase(): void {
   if (!existingCols.has('keywords')) {
     db.exec(`ALTER TABLE listings ADD COLUMN keywords TEXT NOT NULL DEFAULT ''`);
   }
+  if (!existingCols.has('is_hidden')) {
+    db.exec(`ALTER TABLE listings ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0`);
+  }
 
-  // Ensure listings status check allows 'hidden'
-  try {
-    const tableSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='listings'`).get() as { sql: string } | undefined;
-    if (tableSql && tableSql.sql && !tableSql.sql.includes("'hidden'")) {
-      db.exec(`
-        CREATE TABLE listings_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          title TEXT NOT NULL,
-          brand TEXT NOT NULL DEFAULT '',
-          category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
-          governorate TEXT NOT NULL,
-          area TEXT NOT NULL DEFAULT '',
-          model_year INTEGER,
-          engine_cc INTEGER,
-          motor_watts INTEGER,
-          condition TEXT NOT NULL CHECK(condition IN ('new', 'used')),
-          price_iqd INTEGER NOT NULL,
-          negotiable INTEGER NOT NULL DEFAULT 0,
-          phone TEXT NOT NULL,
-          description TEXT NOT NULL,
-          keywords TEXT NOT NULL DEFAULT '',
-          images_json TEXT NOT NULL DEFAULT '[]',
-          video_url TEXT,
-          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'sold', 'rejected', 'hidden')),
-          is_demo INTEGER NOT NULL DEFAULT 0,
-          owner_token_hash TEXT NOT NULL,
-          owner_code_hash TEXT NOT NULL,
-          created_at TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO listings_new SELECT * FROM listings;
-        DROP TABLE listings;
-        ALTER TABLE listings_new RENAME TO listings;
-      `);
-    }
-  } catch (e) {
-    console.error('Migration error for hidden listing status:', e);
+  const sliderCols = db.prepare(`PRAGMA table_info(sliders)`).all() as Array<{ name: string }>;
+  const sliderColNames = new Set(sliderCols.map((c) => c.name));
+  if (!sliderColNames.has('link_url')) {
+    db.exec(`ALTER TABLE sliders ADD COLUMN link_url TEXT NOT NULL DEFAULT ''`);
   }
 
   const defaultSettings: Array<[string, string]> = [
     ['platform_name', 'دراجتي'],
     ['support_phone', ''],
     ['moderation_note', 'تُراجع المنشورات الجديدة قبل نشرها للعامة لضمان جودة ومصداقية الإعلانات.'],
+    ['slider_autoplay_enabled', '1'],
+    ['slider_interval_ms', '5500'],
   ];
   const insertSetting = db.prepare(`INSERT OR IGNORE INTO admin_settings (key, value) VALUES (?, ?)`);
   for (const [k, v] of defaultSettings) {
@@ -293,22 +241,24 @@ export function initDatabase(): void {
   // Ensure auto-approve bypass is disabled
   db.prepare(`INSERT INTO admin_settings (key, value) VALUES ('auto_approve_listings', '0') ON CONFLICT(key) DO UPDATE SET value = '0'`).run();
 
-  // Bootstrap admin_pin_hash using scrypt: use process.env.ADMIN_PIN if provided, otherwise default to '199444'
-  const rawEnvPin = String(process.env.ADMIN_PIN || '199444').trim();
-  const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
-  const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
-  let normEnvPin = rawEnvPin;
-  for (let i = 0; i < 10; i++) {
-    normEnvPin = normEnvPin.replaceAll(arabicDigits[i], String(i)).replaceAll(persianDigits[i], String(i));
-  }
-  const existingPinRow = db.prepare(`SELECT value FROM admin_settings WHERE key = 'admin_pin_hash'`).get() as
-    | { value: string }
-    | undefined;
-  if (!existingPinRow || !existingPinRow.value.includes(':')) {
-    db.prepare(
-      `INSERT INTO admin_settings (key, value, updated_at) VALUES ('admin_pin_hash', ?, datetime('now'))
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-    ).run(hashPassword(normEnvPin));
+  // Bootstrap admin_pin_hash using scrypt ONLY if ADMIN_PIN env var is explicitly provided and no scrypt hash exists yet
+  const rawEnvPin = String(process.env.ADMIN_PIN || '').trim();
+  if (rawEnvPin.length >= 6) {
+    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+    const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
+    let normEnvPin = rawEnvPin;
+    for (let i = 0; i < 10; i++) {
+      normEnvPin = normEnvPin.replaceAll(arabicDigits[i], String(i)).replaceAll(persianDigits[i], String(i));
+    }
+    const existingPinRow = db.prepare(`SELECT value FROM admin_settings WHERE key = 'admin_pin_hash'`).get() as
+      | { value: string }
+      | undefined;
+    if (!existingPinRow || !existingPinRow.value.includes(':')) {
+      db.prepare(
+        `INSERT INTO admin_settings (key, value, updated_at) VALUES ('admin_pin_hash', ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+      ).run(hashPassword(normEnvPin));
+    }
   }
 
   const categoryCount = (db.prepare('SELECT COUNT(*) as cnt FROM categories').get() as { cnt: number }).cnt;

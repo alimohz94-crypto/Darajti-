@@ -1,20 +1,6 @@
-import { db } from './db.ts';
+import type { ListingSearchData, SearchSynonymRecord } from './repositories/listings.ts';
 
-export interface SearchSynonymRow {
-  id: number;
-  term: string;
-  normalized_term: string;
-  target_type: 'brand' | 'category' | 'keyword' | 'ambiguous';
-  canonical_value: string;
-  category_id: number | null;
-  category_name?: string | null;
-  category_slug?: string | null;
-  disambiguation_options_json: string;
-  is_active: number;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-}
+export type SearchSynonymRow = SearchSynonymRecord;
 
 export interface SmartSearchChip {
   key: string;
@@ -325,31 +311,13 @@ function parsePriceAmount(rawText: string): { value: number; display: string } |
   return null;
 }
 
-export function loadActiveCategoriesAndSynonyms() {
-  const categories = db
-    .prepare(`SELECT id, slug, name_ar, is_parts_or_accessories FROM categories ORDER BY sort_order ASC, id ASC`)
-    .all() as Array<{ id: number; slug: string; name_ar: string; is_parts_or_accessories: number }>;
-
-  const synonyms = db
-    .prepare(
-      `
-      SELECT s.*, c.name_ar as category_name, c.slug as category_slug
-      FROM search_synonyms s
-      LEFT JOIN categories c ON c.id = s.category_id
-      ORDER BY LENGTH(s.normalized_term) DESC, s.id ASC
-    `
-    )
-    .all() as SearchSynonymRow[];
-
-  return { categories, synonyms };
-}
-
 export function parseSmartQuery(
   rawQuery: string,
-  ignoredChips: string[] = []
+  ignoredChips: string[] = [],
+  searchData: ListingSearchData
 ): ParsedSearchIntent {
   const ignored = new Set(ignoredChips);
-  const { categories, synonyms } = loadActiveCategoriesAndSynonyms();
+  const { categories, synonyms } = searchData;
   const catBySlug = Object.fromEntries(categories.map((c) => [c.slug, c]));
   const catById = Object.fromEntries(categories.map((c) => [c.id, c]));
 
@@ -617,7 +585,10 @@ export function parseSmartQuery(
     if (ambiguousOrUnassigned) {
       let opts: Array<{ label: string; categorySlug?: string; brand?: string; query?: string }> = [];
       try {
-        opts = JSON.parse(ambiguousOrUnassigned.disambiguation_options_json || '[]');
+        const configuredOptions = ambiguousOrUnassigned.disambiguation_options_json;
+        opts = Array.isArray(configuredOptions)
+          ? configuredOptions
+          : JSON.parse(typeof configuredOptions === 'string' ? configuredOptions || '[]' : '[]');
       } catch {
         opts = [];
       }
@@ -733,13 +704,9 @@ export function parseSmartQuery(
 
   // Strip residual brand prefix if exact brand exists in listings
   if (!intent.brand && !ignored.has('brand') && residualTokens.length > 0) {
-    const knownBrands = db
-      .prepare(`SELECT DISTINCT brand FROM listings WHERE status = 'approved' AND brand != ''`)
-      .all() as Array<{ brand: string }>;
-
     const nextResidual: string[] = [];
     for (const t of residualTokens) {
-      const exactBrand = knownBrands.find((b) => normalizeArabicText(b.brand) === t);
+      const exactBrand = searchData.brands.find((b) => normalizeArabicText(b.brand) === t);
       if (exactBrand && !intent.brand) {
         intent.brand = exactBrand.brand;
       } else {
@@ -900,14 +867,15 @@ function rowMatchesElectricScooter(row: any): boolean {
 
 export function runSmartSearch(
   input: ListingSearchInput,
-  formatRow: (row: any) => any
+  formatRow: (row: any) => any,
+  searchData: ListingSearchData
 ) {
   const q = String(input.q || '').trim();
   const hasTextQuery = q.length > 0;
-  const { categories, synonyms } = loadActiveCategoriesAndSynonyms();
+  const { categories, synonyms } = searchData;
   const catById = Object.fromEntries(categories.map((c) => [c.id, c]));
 
-  const parsed = hasTextQuery ? parseSmartQuery(q, input.ignoredChips || []) : null;
+  const parsed = hasTextQuery ? parseSmartQuery(q, input.ignoredChips || [], searchData) : null;
 
   // Detect conflicts between explicit page filters and NLP-extracted query intents
   const conflicts: SmartSearchConflict[] = [];
@@ -1001,26 +969,8 @@ export function runSmartSearch(
     }
   }
 
-  // Fetch base listings from DB
-  // Rule: Smart search & active listings show approved & available-for-sale ONLY when searching!
-  // On unfiltered home browsing (no q), show approved + sold as before.
-  const baseStatusSql = hasTextQuery
-    ? `l.status = 'approved'`
-    : `l.status IN ('approved', 'sold')`;
-
-  const demoClause = input.hideDemo ? `AND l.is_demo = 0` : '';
-
-  const allRows = db
-    .prepare(
-      `
-      SELECT l.*, c.name_ar as category_name, c.slug as category_slug, c.is_parts_or_accessories
-      FROM listings l
-      JOIN categories c ON c.id = l.category_id
-      WHERE ${baseStatusSql} ${demoClause}
-      ORDER BY l.created_at DESC, l.id DESC
-    `
-    )
-    .all() as any[];
+  const allowedStatuses = hasTextQuery ? ['approved'] : ['approved', 'sold'];
+  const allRows = searchData.listings.filter((row) => allowedStatuses.includes(row.status));
 
   // Constraint checker with optional relaxation flags for Near Results
   const evaluateRow = (
@@ -1284,10 +1234,10 @@ export function runSmartSearch(
   };
 }
 
-export function getSmartSuggestions(rawQuery: string) {
-  const { categories, synonyms } = loadActiveCategoriesAndSynonyms();
+export function getSmartSuggestions(rawQuery: string, searchData: ListingSearchData) {
+  const { categories, synonyms } = searchData;
   const qNorm = normalizeArabicText(rawQuery);
-  const parsed = qNorm ? parseSmartQuery(rawQuery) : null;
+  const parsed = qNorm ? parseSmartQuery(rawQuery, [], searchData) : null;
 
   if (!qNorm) {
     return {
@@ -1316,12 +1266,8 @@ export function getSmartSuggestions(rawQuery: string) {
   });
 
   // 2. Matching real brands from approved listings + active brand synonyms
-  const dbBrands = db
-    .prepare(`SELECT DISTINCT brand FROM listings WHERE status = 'approved' AND brand != ''`)
-    .all() as Array<{ brand: string }>;
-
   const brandSet = new Set<string>();
-  for (const row of dbBrands) {
+  for (const row of searchData.brands) {
     const bn = normalizeArabicText(row.brand);
     if (bn.includes(lastToken) || editDistance(lastToken, bn) <= 1) {
       brandSet.add(row.brand);
@@ -1339,18 +1285,7 @@ export function getSmartSuggestions(rawQuery: string) {
   }
 
   // 3. Matching approved available listings (up to 5)
-  const approvedRows = db
-    .prepare(
-      `
-      SELECT l.id, l.title, l.brand, l.governorate, l.price_iqd, l.engine_cc, l.motor_watts, l.model_year,
-             l.condition, l.images_json, l.description, l.keywords, c.name_ar as category_name, c.slug as category_slug
-      FROM listings l
-      JOIN categories c ON c.id = l.category_id
-      WHERE l.status = 'approved'
-      ORDER BY l.created_at DESC
-    `
-    )
-    .all() as any[];
+  const approvedRows = searchData.listings.filter((row) => row.status === 'approved');
 
   const matchedListings: Array<{
     id: number;
@@ -1392,7 +1327,9 @@ export function getSmartSuggestions(rawQuery: string) {
     ) {
       let imgs: Array<{ url: string; isCover?: boolean }> = [];
       try {
-        imgs = JSON.parse(r.images_json || '[]');
+        imgs = Array.isArray(r.images_json)
+          ? r.images_json
+          : JSON.parse(typeof r.images_json === 'string' ? r.images_json || '[]' : '[]');
       } catch {
         imgs = [];
       }
@@ -1400,7 +1337,7 @@ export function getSmartSuggestions(rawQuery: string) {
         id: r.id,
         title: r.title,
         brand: r.brand || '',
-        category_name: r.category_name,
+        category_name: r.category_name || '',
         governorate: r.governorate,
         price_iqd: r.price_iqd,
         engine_cc: r.engine_cc ?? null,

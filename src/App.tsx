@@ -5,7 +5,6 @@ import {
   ArrowRight,
   ChevronDown,
   Layers,
-  Loader2,
   MapPin,
   RefreshCw,
   Search,
@@ -35,6 +34,7 @@ import {
   fetchListingById,
   fetchSearchSuggestions,
   fetchSliders,
+  fetchSliderSettings,
   fetchSmartSearch,
   getFavorites,
   getLastKnownServerOnline,
@@ -44,7 +44,9 @@ import {
   recordPublicVisitOncePerSession,
   setSavedGovernorate,
   setSavedHideDemo,
+  setFavoriteOnServer,
   subscribeServerConnectivity,
+  syncFavoritesToServer,
   toggleFavoriteLocal,
   verifyAdminPinApi,
 } from './utils/api';
@@ -89,6 +91,8 @@ export default function App() {
   // Core data
   const [categories, setCategories] = useState<Category[]>([]);
   const [sliders, setSliders] = useState<SliderItem[]>([]);
+  const [sliderAutoplay, setSliderAutoplay] = useState(true);
+  const [sliderIntervalMs, setSliderIntervalMs] = useState(5500);
   const [listings, setListings] = useState<Listing[]>([]);
   const [loadingListings, setLoadingListings] = useState(true);
   const [listingsError, setListingsError] = useState<string | null>(null);
@@ -159,6 +163,21 @@ export default function App() {
       offlineNoticeTimerRef.current = null;
     }, 3500);
   }, []);
+
+  useEffect(() => {
+    if (!isOnline) return;
+    let active = true;
+    syncFavoritesToServer()
+      .then((syncedFavorites) => {
+        if (active) setFavorites(syncedFavorites);
+      })
+      .catch(() => {
+        // Keep local favorites available when the server cannot be reached.
+      });
+    return () => {
+      active = false;
+    };
+  }, [isOnline]);
 
   // Verify initial /admin route silently without ever disclosing protected UI to unauthorized visitors
   useEffect(() => {
@@ -334,12 +353,15 @@ export default function App() {
   const loadBootData = useCallback(async () => {
     setInitialBootError(null);
     try {
-      const [cats, slds] = await Promise.all([
+      const [cats, slds, sliderSettings] = await Promise.all([
         fetchCategories(),
         fetchSliders(),
+        fetchSliderSettings().catch(() => ({ autoplay: true, intervalMs: 5500 })),
       ]);
       setCategories(cats);
       setSliders(slds);
+      setSliderAutoplay(sliderSettings.autoplay);
+      setSliderIntervalMs(sliderSettings.intervalMs);
     } catch (err: any) {
       setInitialBootError(err?.message || 'تعذر تحميل الأقسام والعروض.');
     }
@@ -479,7 +501,11 @@ export default function App() {
   };
 
   const handleToggleFavorite = (id: number) => {
-    setFavorites(toggleFavoriteLocal(id));
+    const next = toggleFavoriteLocal(id);
+    setFavorites(next);
+    void setFavoriteOnServer(id, next.includes(id)).catch(() => {
+      // The pending change is retained locally for the next successful sync.
+    });
   };
 
   const resetAllFilters = () => {
@@ -614,7 +640,8 @@ export default function App() {
         setAdminPinError(null);
         return;
       }
-      setAdminPinValue('');
+      // لا تمسح الحقل ولا تُغيّر الصفحة قبل/أثناء/بعد الانتهاء من التحقق عند الفشل؛
+      // اسمح للمستخدم بتصحيح الرمز وإعادة المحاولة. الرسالة عامّة ولا تكشف وجود الإدارة.
       setAdminPinError('تعذّر المتابعة');
       window.setTimeout(() => {
         pinInputRef.current?.focus();
@@ -633,7 +660,8 @@ export default function App() {
 
     const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
     const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
-    let normalized = rawValue;
+    // إزالة جميع المسافات (بما في ذلك غير المقصودة) وتحويل الأرقام العربية/الفارسية إلى إنجليزية
+    let normalized = rawValue.replace(/\s/g, '');
     for (let i = 0; i < 10; i++) {
       normalized = normalized
         .replaceAll(arabicDigits[i], String(i))
@@ -643,7 +671,9 @@ export default function App() {
     setAdminPinValue(normalized);
     if (adminPinError) setAdminPinError(null);
 
-    const candidate = normalized.trim();
+    // أرسل طلب التحقق مرة واحدة فقط عند اكتمال الرمز (6 أرقام)، وليس عند كتابة كل رقم.
+    // يمنع verifyingPin تكرار الطلب أثناء معالجته.
+    const candidate = normalized;
     if (candidate.length >= 6) {
       pinVerifyTimerRef.current = window.setTimeout(() => {
         submitPinForVerification(candidate);
@@ -757,7 +787,7 @@ export default function App() {
           isOpen={addModalOpen}
           isOnline={isOnline}
           categories={categories}
-          defaultGovernorate={governorate}
+          initialCategoryId={null}
           onClose={() => setAddModalOpen(false)}
           onCreatedPreview={(created) => {
             setDetailListing(created);
@@ -815,32 +845,30 @@ export default function App() {
 
                 {isOnline && adminPinOpen && (
                   <div className="absolute top-full right-0 mt-2 bg-white rounded-xl p-2 shadow-xl border border-slate-200 w-44 sm:w-48 z-50">
-                    <div className="relative">
-                      <input
-                        ref={pinInputRef}
-                        type="password"
-                        inputMode="text"
-                        autoFocus
-                        autoComplete="off"
-                        disabled={verifyingPin}
-                        value={adminPinValue}
-                        onChange={(e) => handlePinInputChange(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            submitPinForVerification(adminPinValue);
-                          }
-                        }}
-                        placeholder="اهلا وسهلا بكم"
-                        aria-label="اهلا وسهلا بكم"
-                        className="w-full h-9 pl-8 pr-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[#0D2545] placeholder:text-slate-400 placeholder:tracking-normal text-xs text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-[#F96B11] focus:bg-white"
-                      />
-                      {verifyingPin && (
-                        <div className="absolute left-2.5 top-1/2 -translate-y-1/2">
-                          <Loader2 className="w-4 h-4 animate-spin text-[#F96B11]" />
-                        </div>
-                      )}
-                    </div>
+                    <input
+                      ref={pinInputRef}
+                      type="password"
+                      inputMode="text"
+                      autoFocus
+                      autoComplete="off"
+                      disabled={verifyingPin}
+                      value={adminPinValue}
+                      onChange={(e) => handlePinInputChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          submitPinForVerification(adminPinValue);
+                        }
+                      }}
+                      placeholder="اهلا وسهلا بكم"
+                      aria-label="اهلا وسهلا بكم"
+                      className="w-full h-9 px-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[#0D2545] placeholder:text-slate-400 placeholder:tracking-normal text-xs text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-[#F96B11] focus:bg-white"
+                    />
+                    {verifyingPin && (
+                      <p className="mt-1 text-[11px] font-bold text-[#0D2545] text-center animate-pulse">
+                        جاري التحقق…
+                      </p>
+                    )}
                     {adminPinError && (
                       <p className="mt-1 text-[11px] font-bold text-red-600 text-center">
                         {adminPinError}
@@ -1240,7 +1268,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-4 sm:py-6 space-y-5">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 pt-2 pb-4 sm:pt-3 sm:pb-5 space-y-3 sm:space-y-4">
         {initialBootError && (
           <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 flex items-center justify-between gap-3">
             <span className="text-sm font-bold">{initialBootError}</span>
@@ -1297,7 +1325,13 @@ export default function App() {
             {route.type === 'tab' && route.tab === 'home' && sliders.length > 0 && (
               <HeroSlider
                 slides={sliders}
+                autoplay={sliderAutoplay}
+                intervalMs={sliderIntervalMs}
                 onSlideClick={(slide) => {
+                  if (slide.link_url) {
+                    window.open(slide.link_url, '_blank', 'noopener,noreferrer');
+                    return;
+                  }
                   if (slide.link_category_id) {
                     const cat = categories.find(
                       (c) => c.id === slide.link_category_id
@@ -1844,7 +1878,7 @@ export default function App() {
         isOpen={addModalOpen}
         isOnline={isOnline}
         categories={categories}
-        defaultGovernorate={governorate}
+        initialCategoryId={route.type === 'category_detail' ? route.category.id : null}
         onClose={() => setAddModalOpen(false)}
         onCreatedPreview={(created) => {
           setDetailListing(created);

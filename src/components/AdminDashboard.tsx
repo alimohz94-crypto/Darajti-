@@ -25,6 +25,7 @@ import {
   Plus,
   PlusCircle,
   RefreshCw,
+  Save as SaveIcon,
   Search,
   Settings,
   ShieldCheck,
@@ -42,6 +43,7 @@ import {
   formatPriceIQD,
   IRAQI_GOVERNORATES,
   Listing,
+  ListingStatus,
   ReportItem,
   SearchSynonym,
   SliderItem,
@@ -71,6 +73,7 @@ import {
   markAllNotificationsReadApi,
   markNotificationReadApi,
   searchAdminApi,
+  toggleHideListingApi,
   updateAdminPinApi,
   updateAdminSettings,
   updateAdminSynonym,
@@ -136,6 +139,79 @@ export function AdminDashboard({
   const [dataError, setDataError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
 
+  // Browse Management (إدارة التصفح) states
+  const [browseView, setBrowseView] = useState<'published' | 'hidden'>('published');
+  const [browseSearch, setBrowseSearch] = useState('');
+  const [browseCategoryFilter, setBrowseCategoryFilter] = useState<number | null>(null);
+  const [browseGovernorateFilter, setBrowseGovernorateFilter] = useState('');
+  const [browseStatusFilter, setBrowseStatusFilter] = useState<'all' | 'approved' | 'sold'>('all');
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingListing, setEditingListing] = useState<Listing | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Add Listing Form State
+  const [addForm, setAddForm] = useState<{
+    title: string;
+    brand: string;
+    category_id: number | null;
+    governorate: string;
+    area: string;
+    model_year: string;
+    engine_cc: string;
+    motor_watts: string;
+    condition: 'new' | 'used';
+    price_iqd: string;
+    negotiable: boolean;
+    phone: string;
+    description: string;
+    keywords: string;
+    images: { url: string; isCover: boolean }[];
+    video_url: string | null;
+  }>({
+    title: '',
+    brand: '',
+    category_id: null,
+    governorate: '',
+    area: '',
+    model_year: '',
+    engine_cc: '',
+    motor_watts: '',
+    condition: 'used',
+    price_iqd: '',
+    negotiable: false,
+    phone: '',
+    description: '',
+    keywords: '',
+    images: [],
+    video_url: null,
+  });
+  const [addErrors, setAddErrors] = useState<Record<string, string>>({});
+  const [addIsUploading, setAddIsUploading] = useState(false);
+
+  // Edit Listing Form State
+  const [editForm, setEditForm] = useState<{
+    title: string;
+    brand: string;
+    category_id: number | null;
+    governorate: string;
+    area: string;
+    model_year: string;
+    engine_cc: string;
+    motor_watts: string;
+    condition: 'new' | 'used';
+    price_iqd: string;
+    negotiable: boolean;
+    phone: string;
+    description: string;
+    keywords: string;
+    images: { url: string; isCover: boolean }[];
+    video_url: string | null;
+    status: ListingStatus;
+  } | null>(null);
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [editIsUploading, setEditIsUploading] = useState(false);
+
   // Category Form State
   const [catName, setCatName] = useState('');
   const [catImage, setCatImage] = useState('');
@@ -149,8 +225,12 @@ export function AdminDashboard({
   const [slideSubtitle, setSlideSubtitle] = useState('');
   const [slideImage, setSlideImage] = useState('');
   const [slideLinkCatId, setSlideLinkCatId] = useState('');
+  const [slideLinkUrl, setSlideLinkUrl] = useState('');
   const [slideSort, setSlideSort] = useState('1');
   const [slideActive, setSlideActive] = useState(true);
+  const [slidePendingUrls, setSlidePendingUrls] = useState<string[]>([]);
+  const [sliderAutoplayForm, setSliderAutoplayForm] = useState(true);
+  const [sliderIntervalForm, setSliderIntervalForm] = useState('5500');
   const [editingSlideId, setEditingSlideId] = useState<number | null>(null);
   const [slideSaving, setSlideSaving] = useState(false);
 
@@ -181,126 +261,6 @@ export function AdminDashboard({
   const notify = (msg: string) => {
     setActionMsg(msg);
     window.setTimeout(() => setActionMsg(null), 3000);
-  };
-
-  // Browsing Management / Listings Management State
-  const [listingsTab, setListingsTab] = useState<'published' | 'hidden'>('published');
-  const [listingsSearch, setListingsSearch] = useState('');
-  const [listingsCatFilter, setListingsCatFilter] = useState('all');
-  const [listingsGovFilter, setListingsGovFilter] = useState('all');
-
-  const [addListingModalOpen, setAddListingModalOpen] = useState(false);
-  const [editListingObj, setEditListingObj] = useState<Listing | null>(null);
-  const [deleteListingTarget, setDeleteListingTarget] = useState<Listing | null>(null);
-
-  // Listing Form Fields
-  const [formTitle, setFormTitle] = useState('');
-  const [formBrand, setFormBrand] = useState('');
-  const [formCatId, setFormCatId] = useState('');
-  const [formGov, setFormGov] = useState('بغداد');
-  const [formArea, setFormArea] = useState('');
-  const [formModelYear, setFormModelYear] = useState('2024');
-  const [formEngineCc, setFormEngineCc] = useState('');
-  const [formMotorWatts, setFormMotorWatts] = useState('');
-  const [formCondition, setFormCondition] = useState<'new' | 'used'>('used');
-  const [formPrice, setFormPrice] = useState('');
-  const [formNegotiable, setFormNegotiable] = useState(false);
-  const [formPhone, setFormPhone] = useState('');
-  const [formDesc, setFormDesc] = useState('');
-  const [formKeywords, setFormKeywords] = useState('');
-  const [formImages, setFormImages] = useState<Array<{ url: string; isCover: boolean }>>([]);
-  const [formVideoUrl, setFormVideoUrl] = useState<string | null>(null);
-  const [formSaving, setFormSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [uploadingImg, setUploadingImg] = useState(false);
-  const [uploadingVid, setUploadingVid] = useState(false);
-
-  const handleOpenAddListing = () => {
-    setFormTitle('');
-    setFormBrand('');
-    setFormCatId(categories[0] ? String(categories[0].id) : '');
-    setFormGov('بغداد');
-    setFormArea('');
-    setFormModelYear('2024');
-    setFormEngineCc('');
-    setFormMotorWatts('');
-    setFormCondition('used');
-    setFormPrice('');
-    setFormNegotiable(false);
-    setFormPhone('');
-    setFormDesc('');
-    setFormKeywords('');
-    setFormImages([]);
-    setFormVideoUrl(null);
-    setFormError(null);
-    setEditListingObj(null);
-    setAddListingModalOpen(true);
-  };
-
-  const handleOpenEditListing = (item: Listing) => {
-    setEditListingObj(item);
-    setFormTitle(item.title);
-    setFormBrand(item.brand || '');
-    setFormCatId(String(item.category_id));
-    setFormGov(item.governorate);
-    setFormArea(item.area || '');
-    setFormModelYear(item.model_year ? String(item.model_year) : '');
-    setFormEngineCc(item.engine_cc ? String(item.engine_cc) : '');
-    setFormMotorWatts(item.motor_watts ? String(item.motor_watts) : '');
-    setFormCondition(item.condition);
-    setFormPrice(String(item.price_iqd));
-    setFormNegotiable(item.negotiable);
-    setFormPhone(item.phone);
-    setFormDesc(item.description);
-    setFormKeywords(item.keywords || '');
-    setFormImages(item.images.map((i) => ({ url: i.url, isCover: i.isCover })));
-    setFormVideoUrl(item.video_url);
-    setFormError(null);
-    setAddListingModalOpen(true);
-  };
-
-  const handleSaveListingSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (formSaving) return;
-    setFormSaving(true);
-    setFormError(null);
-    try {
-      const payload = {
-        title: formTitle.trim(),
-        brand: formBrand.trim(),
-        category_id: Number(formCatId),
-        governorate: formGov,
-        area: formArea.trim(),
-        model_year: formModelYear ? Number(formModelYear) : null,
-        engine_cc: formEngineCc ? Number(formEngineCc) : null,
-        motor_watts: formMotorWatts ? Number(formMotorWatts) : null,
-        condition: formCondition,
-        price_iqd: Number(formPrice),
-        negotiable: formNegotiable,
-        phone: formPhone.trim(),
-        description: formDesc.trim(),
-        keywords: formKeywords.trim(),
-        images: formImages,
-        video_url: formVideoUrl,
-        status: editListingObj ? editListingObj.status : 'approved',
-      };
-
-      if (editListingObj) {
-        await updateListingFields(editListingObj.id, payload);
-        notify('تم تحديث المنشور بنجاح.');
-      } else {
-        await createAdminListingApi(payload);
-        notify('تم إضافة ونشر المنشور الجديد بنجاح.');
-      }
-      setAddListingModalOpen(false);
-      setEditListingObj(null);
-      await loadAllAdminData(activityDays, listingStatusFilter);
-      onDataChanged();
-    } catch (err: any) {
-      setFormError(err?.message || 'تعذر حفظ المنشور.');
-    } finally {
-      setFormSaving(false);
-    }
   };
 
   // Verify server-side HttpOnly admin session on mount
@@ -347,6 +307,8 @@ export function AdminDashboard({
         setReports(r);
         setNotifications(n);
         setSettings(st);
+        setSliderAutoplayForm(st.slider_autoplay_enabled !== '0');
+        setSliderIntervalForm(st.slider_interval_ms || '5500');
         setSynonyms(synRes.synonyms || []);
         setKnownBrands(synRes.knownBrands || []);
         setAuditLogs(logs || []);
@@ -436,7 +398,7 @@ export function AdminDashboard({
 
   const handleChangeListingStatus = async (
     id: number,
-    status: 'approved' | 'rejected' | 'sold' | 'pending' | 'hidden'
+    status: 'approved' | 'rejected' | 'sold' | 'pending'
   ) => {
     try {
       await updateListingStatus(id, status);
@@ -447,9 +409,7 @@ export function AdminDashboard({
             ? 'تم رفض المنشور.'
             : status === 'sold'
               ? 'تم تحديث الحالة إلى تم البيع.'
-              : status === 'hidden'
-                ? 'تم إخفاء المنشور من التصفح.'
-                : 'تمت إعادة المنشور للمراجعة.'
+              : 'تمت إعادة المنشور للمراجعة.'
       );
       await loadAllAdminData(activityDays, listingStatusFilter);
       onDataChanged();
@@ -469,6 +429,25 @@ export function AdminDashboard({
     }
   };
 
+  const handleToggleHideListing = async (id: number, currentlyHidden: boolean) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await toggleHideListingApi(id, !currentlyHidden);
+      notify(
+        currentlyHidden
+          ? 'تم إعادة نشر المنشور في التصفح العام.'
+          : 'تم إخفاء المنشور من التصفح العام.'
+      );
+      await loadAllAdminData(activityDays, listingStatusFilter);
+      onDataChanged();
+    } catch (err: any) {
+      notify(err?.message || 'تعذر تنفيذ العملية.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleClearDemoData = async () => {
     try {
       const res = await deleteAllDemoListingsApi();
@@ -477,6 +456,182 @@ export function AdminDashboard({
       onDataChanged();
     } catch (err: any) {
       notify(err?.message || 'تعذر حذف البيانات التجريبية.');
+    }
+  };
+
+  const handleOpenAddModal = () => {
+    setAddForm({
+      title: '', brand: '', category_id: null, governorate: '', area: '',
+      model_year: '', engine_cc: '', motor_watts: '', condition: 'used',
+      price_iqd: '', negotiable: false, phone: '', description: '', keywords: '',
+      images: [], video_url: null,
+    });
+    setAddErrors({});
+    setAddModalOpen(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setAddModalOpen(false);
+    setAddForm({
+      title: '', brand: '', category_id: null, governorate: '', area: '',
+      model_year: '', engine_cc: '', motor_watts: '', condition: 'used',
+      price_iqd: '', negotiable: false, phone: '', description: '', keywords: '',
+      images: [], video_url: null,
+    });
+    setAddErrors({});
+  };
+
+  const handleAddFormChange = (key: string, value: any) => {
+    setAddForm((prev) => ({ ...prev, [key]: value }));
+    if (addErrors[key]) setAddErrors((prev) => { const next = { ...prev }; delete next[key]; return next; });
+  };
+
+  const handleAddImage = async (file: File | undefined, onDone: (url: string) => void) => {
+    if (!file) return;
+    try {
+      setAddIsUploading(true);
+      const urls = await uploadImagesApi([file]);
+      if (urls[0]) onDone(urls[0]);
+    } catch (err: any) {
+      notify(err?.message || 'فشل رفع الصورة.');
+    } finally {
+      setAddIsUploading(false);
+    }
+  };
+
+  const handleOpenAddImagePicker = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.onchange = async (event: Event) => {
+      const files = Array.from((event.target as HTMLInputElement).files || []);
+      for (const file of files) {
+        await handleAddImage(file, (url) => {
+          setAddForm((prev) => ({
+            ...prev,
+            images: [...prev.images, { url, isCover: prev.images.length === 0 }],
+          }));
+        });
+      }
+    };
+    input.click();
+  };
+
+  const handleCreateAdminListing = async () => {
+    const errors: Record<string, string> = {};
+    if (!addForm.title.trim() || addForm.title.trim().length < 3) errors.title = 'العنوان يجب ألا يقل عن 3 حروف.';
+    if (!addForm.category_id) errors.category_id = 'يرجى اختيار قسم.';
+    if (!addForm.governorate) errors.governorate = 'يرجى اختيار محافظة.';
+    if (!addForm.price_iqd || Number(addForm.price_iqd) < 1000) errors.price_iqd = 'السعر يجب ألا يقل عن 1000 دينار.';
+    if (!addForm.phone || !/^07[3-9]\d{8}$/.test(addForm.phone)) errors.phone = 'رقم الهاتف غير صالح.';
+    if (!addForm.description.trim() || addForm.description.trim().length < 10) errors.description = 'الوصف يجب ألا يقل عن 10 حروف.';
+    if (addForm.images.length === 0) errors.images = 'يجب إضافة صورة واحدة على الأقل.';
+    setAddErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await createAdminListingApi({
+        title: addForm.title.trim(), brand: addForm.brand.trim(),
+        category_id: addForm.category_id!, governorate: addForm.governorate, area: addForm.area,
+        model_year: addForm.model_year ? Number(addForm.model_year) : null,
+        engine_cc: addForm.engine_cc ? Number(addForm.engine_cc) : null,
+        motor_watts: addForm.motor_watts ? Number(addForm.motor_watts) : null,
+        condition: addForm.condition, price_iqd: Math.round(Number(addForm.price_iqd)),
+        negotiable: addForm.negotiable, phone: addForm.phone,
+        description: addForm.description.trim(), keywords: addForm.keywords.trim(),
+        images: addForm.images, video_url: addForm.video_url,
+      });
+      notify('تم إضافة المنشور ونشره مباشرة.');
+      handleCloseAddModal();
+      await loadAllAdminData(activityDays, listingStatusFilter);
+      onDataChanged();
+    } catch (err: any) {
+      notify(err?.message || 'تعذر إضافة المنشور.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenEditModal = (listing: Listing) => {
+    setEditingListing(listing);
+    setEditForm({
+      title: listing.title, brand: listing.brand, category_id: listing.category_id,
+      governorate: listing.governorate, area: listing.area,
+      model_year: listing.model_year ? String(listing.model_year) : '',
+      engine_cc: listing.engine_cc ? String(listing.engine_cc) : '',
+      motor_watts: listing.motor_watts ? String(listing.motor_watts) : '',
+      condition: listing.condition, price_iqd: String(listing.price_iqd),
+      negotiable: listing.negotiable,       phone: listing.phone || '',
+      description: listing.description, keywords: listing.keywords,
+      images: listing.images.map((img) => ({ url: img.url, isCover: img.isCover })),
+      video_url: listing.video_url, status: listing.status,
+    });
+    setEditErrors({});
+    setEditModalOpen(true);
+  };
+
+  const handleCloseEditModal = () => {
+    setEditModalOpen(false);
+    setEditingListing(null);
+    setEditForm(null);
+    setEditErrors({});
+  };
+
+  const handleEditFormChange = (key: string, value: any) => {
+    if (!editForm) return;
+    setEditForm((prev) => (prev ? { ...prev, [key]: value } : null));
+    if (editErrors[key]) setEditErrors((prev) => { const next = { ...prev }; delete next[key]; return next; });
+  };
+
+  const handleEditImage = async (file: File | undefined, onDone: (url: string) => void) => {
+    if (!file) return;
+    try {
+      setEditIsUploading(true);
+      const urls = await uploadImagesApi([file]);
+      if (urls[0]) onDone(urls[0]);
+    } catch (err: any) {
+      notify(err?.message || 'فشل رفع الصورة.');
+    } finally {
+      setEditIsUploading(false);
+    }
+  };
+
+  const handleSaveEditListing = async () => {
+    if (!editForm || !editingListing) return;
+    const errors: Record<string, string> = {};
+    if (!editForm.title.trim() || editForm.title.trim().length < 3) errors.title = 'العنوان يجب ألا يقل عن 3 حروف.';
+    if (!editForm.category_id) errors.category_id = 'يرجى اختيار قسم.';
+    if (!editForm.governorate) errors.governorate = 'يرجى اختيار محافظة.';
+    if (!editForm.price_iqd || Number(editForm.price_iqd) < 1000) errors.price_iqd = 'السعر يجب ألا يقل عن 1000 دينار.';
+    if (!editForm.phone || !/^07[3-9]\d{8}$/.test(editForm.phone)) errors.phone = 'رقم الهاتف غير صالح.';
+    if (!editForm.description.trim() || editForm.description.trim().length < 10) errors.description = 'الوصف يجب ألا يقل عن 10 حروف.';
+    if (editForm.images.length === 0) errors.images = 'يجب إضافة صورة واحدة على الأقل.';
+    setEditErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await updateListingFields(editingListing.id, {
+        title: editForm.title.trim(), brand: editForm.brand.trim(),
+        category_id: editForm.category_id, governorate: editForm.governorate, area: editForm.area,
+        model_year: editForm.model_year ? Number(editForm.model_year) : null,
+        engine_cc: editForm.engine_cc ? Number(editForm.engine_cc) : null,
+        motor_watts: editForm.motor_watts ? Number(editForm.motor_watts) : null,
+        condition: editForm.condition, price_iqd: Math.round(Number(editForm.price_iqd)),
+        negotiable: editForm.negotiable, phone: editForm.phone,
+        description: editForm.description.trim(), keywords: editForm.keywords.trim(),
+        images: editForm.images, video_url: editForm.video_url, status: editForm.status,
+      });
+      notify('تم تحديث المنشور ونشر التغييرات في التصفح العام.');
+      handleCloseEditModal();
+      await loadAllAdminData(activityDays, listingStatusFilter);
+      onDataChanged();
+    } catch (err: any) {
+      notify(err?.message || 'تعذر تحديث المنشور.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -532,33 +687,56 @@ export function AdminDashboard({
 
   const handleSaveSlider = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!slideTitle.trim() || !slideImage.trim()) {
+    const imageUrls = editingSlideId
+      ? (slideImage.trim() ? [slideImage.trim()] : [])
+      : slidePendingUrls.length > 0
+        ? slidePendingUrls
+        : (slideImage.trim() ? [slideImage.trim()] : []);
+    if (!slideTitle.trim() || imageUrls.length === 0) {
       notify('يرجى إدخال عنوان الشريحة ورفع صورتها.');
+      return;
+    }
+    if (slideLinkUrl.trim() && !/^https?:\/\/.{3,}/i.test(slideLinkUrl.trim())) {
+      notify('الرابط الاختياري يجب أن يبدأ بـ http:// أو https://.');
       return;
     }
     setSlideSaving(true);
     try {
-      const payload = {
-        title: slideTitle.trim(),
-        subtitle: slideSubtitle.trim(),
-        image_url: slideImage.trim(),
-        link_category_id: slideLinkCatId ? Number(slideLinkCatId) : null,
-        sort_order: Number(slideSort) || 1,
-        is_active: slideActive,
-      };
       if (editingSlideId) {
-        await updateSliderApi(editingSlideId, payload);
+        await updateSliderApi(editingSlideId, {
+          title: slideTitle.trim(),
+          subtitle: slideSubtitle.trim(),
+          image_url: imageUrls[0],
+          link_category_id: slideLinkCatId ? Number(slideLinkCatId) : null,
+          link_url: slideLinkUrl.trim(),
+          sort_order: Number(slideSort) || 1,
+          is_active: slideActive,
+        });
         notify('تم تحديث الشريحة.');
       } else {
-        await createSliderApi(payload);
-        notify('تمت إضافة الشريحة.');
+        for (let i = 0; i < imageUrls.length; i++) {
+          await createSliderApi({
+            title: slideTitle.trim(),
+            subtitle: slideSubtitle.trim(),
+            image_url: imageUrls[i],
+            link_category_id: slideLinkCatId ? Number(slideLinkCatId) : null,
+            link_url: slideLinkUrl.trim(),
+            sort_order: (Number(slideSort) || 1) + i,
+            is_active: slideActive,
+          });
+        }
+        notify(imageUrls.length > 1 ? `تمت إضافة ${imageUrls.length} شرائح.` : 'تمت إضافة الشريحة.');
       }
       setSlideTitle('');
       setSlideSubtitle('');
       setSlideImage('');
       setSlideLinkCatId('');
+      setSlideLinkUrl('');
+      setSlidePendingUrls([]);
+      setSlideLinkUrl('');
       setSlideSort('1');
       setSlideActive(true);
+      setSlidePendingUrls([]);
       setEditingSlideId(null);
       await loadAllAdminData(activityDays, listingStatusFilter);
       onDataChanged();
@@ -570,6 +748,7 @@ export function AdminDashboard({
   };
 
   const handleDeleteSlider = async (id: number) => {
+    if (!window.confirm('هل تريد حذف هذه الشريحة نهائيًا؟')) return;
     try {
       await deleteSliderApi(id);
       notify('تم حذف الشريحة.');
@@ -577,6 +756,61 @@ export function AdminDashboard({
       onDataChanged();
     } catch (err: any) {
       notify(err?.message || 'تعذر حذف الشريحة.');
+    }
+  };
+
+  const handleUploadMultipleSliderImages = async (files: FileList | null) => {
+    if (!files?.length) return;
+    try {
+      const urls = await uploadImagesApi(Array.from(files));
+      setSlidePendingUrls((prev) => [...prev, ...urls]);
+      if (!slideImage && urls[0]) setSlideImage(urls[0]);
+      notify(urls.length > 1 ? `تم رفع ومعاينة ${urls.length} صور.` : 'تم رفع ومعاينة الصورة.');
+    } catch (err: any) {
+      notify(err?.message || 'تعذر رفع صور السلايدر.');
+    }
+  };
+
+  const handleToggleSlider = async (slider: SliderItem) => {
+    try {
+      await updateSliderApi(slider.id, { is_active: !slider.is_active });
+      await loadAllAdminData(activityDays, listingStatusFilter);
+      onDataChanged();
+      notify(slider.is_active ? 'تم إخفاء الشريحة.' : 'تم تفعيل الشريحة.');
+    } catch (err: any) {
+      notify(err?.message || 'تعذر تغيير حالة الشريحة.');
+    }
+  };
+
+  const handleMoveSlider = async (slider: SliderItem, direction: -1 | 1) => {
+    const ordered = [...sliders].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+    const index = ordered.findIndex((item) => item.id === slider.id);
+    const target = ordered[index + direction];
+    if (!target) return;
+    try {
+      await Promise.all([
+        updateSliderApi(slider.id, { sort_order: target.sort_order }),
+        updateSliderApi(target.id, { sort_order: slider.sort_order }),
+      ]);
+      await loadAllAdminData(activityDays, listingStatusFilter);
+      onDataChanged();
+    } catch (err: any) {
+      notify(err?.message || 'تعذر تغيير ترتيب الشرائح.');
+    }
+  };
+
+  const handleSaveSliderSettings = async () => {
+    const interval = Math.max(2000, Math.min(30000, Number(sliderIntervalForm) || 5500));
+    try {
+      await updateAdminSettings({
+        slider_autoplay_enabled: sliderAutoplayForm ? '1' : '0',
+        slider_interval_ms: String(interval),
+      });
+      setSliderIntervalForm(String(interval));
+      notify('تم حفظ إعدادات التشغيل التلقائي.');
+      onDataChanged();
+    } catch (err: any) {
+      notify(err?.message || 'تعذر حفظ إعدادات السلايدر.');
     }
   };
 
@@ -783,6 +1017,34 @@ export function AdminDashboard({
     listingStatusFilter === 'all'
       ? listings
       : listings.filter((l) => l.status === listingStatusFilter);
+
+  const getFilteredBrowseListings = () => {
+    let result = listings.filter((l) =>
+      browseView === 'published' ? !l.is_hidden : l.is_hidden
+    );
+    if (browseStatusFilter !== 'all') {
+      result = result.filter((l) => l.status === browseStatusFilter);
+    }
+    if (browseCategoryFilter) {
+      result = result.filter((l) => l.category_id === browseCategoryFilter);
+    }
+    if (browseGovernorateFilter) {
+      result = result.filter((l) =>
+        l.governorate.includes(browseGovernorateFilter)
+      );
+    }
+    if (browseSearch) {
+      const q = browseSearch.toLowerCase();
+      result = result.filter(
+        (l) =>
+          l.title.toLowerCase().includes(q) ||
+          l.category_name.toLowerCase().includes(q) ||
+          l.governorate.toLowerCase().includes(q) ||
+          l.brand.toLowerCase().includes(q)
+      );
+    }
+    return result.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  };
 
   const navItems: Array<{
     id: AdminSection;
@@ -1350,229 +1612,258 @@ export function AdminDashboard({
             </div>
           )}
 
-          {/* SECTION 2: BROWSING MANAGEMENT (إدارة التصفح) */}
-          {activeSection === 'listings' && (() => {
-            const filteredBrowseListings = listings.filter((item) => {
-              if (listingsTab === 'published') {
-                if (item.status !== 'approved' && item.status !== 'sold') return false;
-              } else {
-                if (item.status !== 'hidden') return false;
-              }
-
-              const q = listingsSearch.trim().toLowerCase();
-              if (q) {
-                const matchTitle = item.title.toLowerCase().includes(q);
-                const matchBrand = (item.brand || '').toLowerCase().includes(q);
-                const matchDesc = item.description.toLowerCase().includes(q);
-                if (!matchTitle && !matchBrand && !matchDesc) return false;
-              }
-
-              if (listingsCatFilter !== 'all' && String(item.category_id) !== listingsCatFilter) {
-                return false;
-              }
-
-              if (listingsGovFilter !== 'all' && item.governorate !== listingsGovFilter) {
-                return false;
-              }
-
-              return true;
-            });
-
-            return (
-              <section className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 p-1 rounded-xl bg-[#071636] border border-sky-400/25">
-                    <button
-                      type="button"
-                      onClick={() => setListingsTab('published')}
-                      className={`h-9 px-4 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                        listingsTab === 'published'
-                          ? 'bg-amber-400 text-[#051029]'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      المنشورة ({(listings.filter(l => l.status === 'approved' || l.status === 'sold')).length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setListingsTab('hidden')}
-                      className={`h-9 px-4 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                        listingsTab === 'hidden'
-                          ? 'bg-amber-400 text-[#051029]'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      المخفية ({(listings.filter(l => l.status === 'hidden')).length})
-                    </button>
+          {/* SECTION 2: BROWSE MANAGEMENT (إدارة التصفح) */}
+          {activeSection === 'listings' && (
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {/* تبويبات المنشورة / المخفية */}
+                  <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#071636] border border-sky-400/25">
+                    {[
+                      { id: 'published', label: 'المنشورة' },
+                      { id: 'hidden', label: 'المخفية' },
+                    ].map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setBrowseView(v.id as 'published' | 'hidden')}
+                        className={`h-9 px-3 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                          browseView === v.id
+                            ? 'bg-amber-400 text-[#051029]'
+                            : 'text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        {v.label}
+                      </button>
+                    ))}
                   </div>
 
+                  {/* فلاتر case status */}
+                  <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#071636] border border-sky-400/25">
+                    {[
+                      { id: 'all', label: 'الكل' },
+                      { id: 'approved', label: 'معتمدة' },
+                      { id: 'sold', label: 'تم البيع' },
+                    ].map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => setBrowseStatusFilter(st.id as 'all' | 'approved' | 'sold')}
+                        className={`h-9 px-3 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                          browseStatusFilter === st.id
+                            ? 'bg-teal-500/20 text-teal-200 border border-teal-400/40'
+                            : 'text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <input
+                    type="search"
+                    value={browseSearch}
+                    onChange={(e) => setBrowseSearch(e.target.value)}
+                    placeholder="ابحث في المنشورات..."
+                    className="w-48 sm:w-64 h-9 pr-4 pl-3 rounded-xl bg-[#081635] border border-sky-400/40 text-white placeholder:text-slate-400 text-xs focus:border-amber-400/80 focus:outline-none focus:ring-2 focus:ring-sky-400/25"
+                  />
+
+                  <select
+                    value={browseCategoryFilter ?? ''}
+                    onChange={(e) => setBrowseCategoryFilter(e.target.value ? Number(e.target.value) : null)}
+                    className="w-32 sm:w-48 h-9 pr-3 pl-3 rounded-xl bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80 focus:outline-none focus:ring-2 focus:ring-sky-400/25"
+                  >
+                    <option value="">جميع الأقسام</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name_ar}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="text"
+                    value={browseGovernorateFilter}
+                    onChange={(e) => setBrowseGovernorateFilter(e.target.value)}
+                    placeholder="محافظة..."
+                    className="w-32 sm:w-40 h-9 pr-3 pl-3 rounded-xl bg-[#081635] border border-sky-400/40 text-white placeholder:text-slate-400 text-xs focus:border-amber-400/80 focus:outline-none focus:ring-2 focus:ring-sky-400/25"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenAddModal}
+                  disabled={isSubmitting}
+                  className="h-10 px-5 rounded-xl bg-[#F96B11] hover:bg-[#F96B11]/90 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>إضافة منشور</span>
+                </button>
+
+                {listings.some((l) => l.is_demo) && (
                   <button
                     type="button"
-                    onClick={handleOpenAddListing}
-                    className="h-10 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#051029] text-xs font-extrabold inline-flex items-center gap-1.5 shadow-md cursor-pointer"
+                    onClick={handleClearDemoData}
+                    className="h-10 px-4 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-400/35 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>إضافة منشور</span>
+                    <Trash2 className="w-4 h-4" />
+                    <span>حذف البيانات التجريبية</span>
                   </button>
+                )}
+              </div>
+
+              {getFilteredBrowseListings().length === 0 ? (
+                <div className="rounded-2xl bg-[#071636] border border-sky-400/20 p-10 text-center text-sm text-slate-400">
+                  لا توجد منشورات ضمن هذا الفلتر حالياً.
                 </div>
-
-                {/* Filters & Search Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-[#071636] border border-sky-400/25 p-3 rounded-2xl">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="search"
-                      value={listingsSearch}
-                      onChange={(e) => setListingsSearch(e.target.value)}
-                      placeholder="بحث بالعنوان أو الماركة..."
-                      className="w-full h-10 pr-9 pl-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white placeholder:text-slate-400 text-xs"
-                    />
-                  </div>
-
-                  <select
-                    value={listingsCatFilter}
-                    onChange={(e) => setListingsCatFilter(e.target.value)}
-                    className="h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  >
-                    <option value="all">جميع الأقسام</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={String(c.id)}>
-                        {c.name_ar}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={listingsGovFilter}
-                    onChange={(e) => setListingsGovFilter(e.target.value)}
-                    className="h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  >
-                    <option value="all">جميع المحافظات</option>
-                    {IRAQI_GOVERNORATES.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {filteredBrowseListings.length === 0 ? (
-                  <div className="rounded-2xl bg-[#071636] border border-sky-400/20 p-12 text-center text-sm text-slate-400">
-                    لا توجد منشورات مطابقة لمعايير التصفح والبحث الحالية.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                    {filteredBrowseListings.map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-2xl bg-[#071636] border border-sky-400/25 p-4 flex gap-3.5 shadow-sm"
-                      >
-                        <div className="w-24 h-24 rounded-xl overflow-hidden shrink-0 bg-[#040E24] border border-white/10">
-                          <ProgressiveImage
-                            src={
-                              item.images.find((i) => i.isCover)?.url ||
-                              item.images[0]?.url
-                            }
-                            alt={item.title}
-                            containerClassName="w-full h-full"
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0 flex flex-col justify-between">
-                          <div>
-                            <div className="flex items-start justify-between gap-2">
-                              <h3 className="font-bold text-sm text-white truncate">
-                                {item.title}
-                              </h3>
-                              <span
-                                className={`text-[11px] font-bold shrink-0 ${
-                                  item.status === 'approved'
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {getFilteredBrowseListings().map((item) => (
+                    <div
+                      key={item.id}
+                      className={`rounded-2xl p-4 flex gap-3.5 border ${
+                        item.is_hidden
+                          ? 'bg-[#071636]/60 border-slate-500/30'
+                          : 'bg-[#071636] border-sky-400/25'
+                      }`}
+                    >
+                      <div className="w-24 h-24 rounded-xl overflow-hidden shrink-0 bg-[#040E24] border border-white/10 relative">
+                        <ProgressiveImage
+                          src={
+                            item.images.find((i) => i.isCover)?.url ||
+                            item.images[0]?.url
+                          }
+                          alt={item.title}
+                          containerClassName="w-full h-full"
+                        />
+                        {item.is_hidden && (
+                          <div className="absolute top-2 left-2 bg-amber-500/90 text-[#051029] text-xs font-bold px-2 py-0.5 rounded">
+                            مخفي
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <h3 className="font-bold text-sm text-white truncate">
+                              {item.title}
+                            </h3>
+                            <span
+                              className={`text-[11px] font-bold shrink-0 ${
+                                item.status === 'pending'
+                                  ? 'text-amber-300'
+                                  : item.status === 'approved'
                                     ? 'text-teal-300'
                                     : item.status === 'sold'
                                       ? 'text-sky-300'
-                                      : 'text-slate-400'
-                                }`}
-                              >
-                                {item.status === 'approved'
+                                      : 'text-red-400'
+                              }`}
+                            >
+                              {item.status === 'pending'
+                                ? 'قيد المراجعة'
+                                : item.status === 'approved'
                                   ? 'منشور'
                                   : item.status === 'sold'
                                     ? 'تم البيع'
-                                    : 'مخفي'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-300 mt-0.5 truncate">
-                              {item.category_name} · {item.governorate} ·{' '}
-                              <span className="tabular-nums text-amber-300 font-bold">
-                                {formatPriceIQD(item.price_iqd)} د.ع
-                              </span>
-                            </p>
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              نشر في: {formatArabicDate(item.created_at)}
-                            </p>
+                                    : 'مرفوض'}
+                            </span>
                           </div>
+                          <p className="text-xs text-slate-400 mt-0.5 truncate">
+                            {item.category_name} · {item.governorate} ·{' '}
+                            <span className="tabular-nums text-amber-300">
+                              {formatPriceIQD(item.price_iqd)} د.ع
+                            </span>
+                            {item.is_demo ? ' · تجريبي' : ''}
+                            {item.is_hidden ? ' · مخفي عن التصفح' : ''}
+                          </p>
+                        </div>
 
-                          <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                          {item.status !== 'approved' && (
                             <button
                               type="button"
-                              onClick={() => handleOpenEditListing(item)}
-                              className="h-8 px-2.5 rounded-lg bg-amber-400/20 border border-amber-400/40 text-amber-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                              onClick={() =>
+                                handleChangeListingStatus(item.id, 'approved')
+                              }
+                              className="h-8 px-2.5 rounded-lg bg-teal-500/20 border border-teal-400/40 text-teal-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
                             >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              تعديل
+                              <Check className="w-3.5 h-3.5" />
+                              اعتماد
                             </button>
+                          )}
+                          {item.status === 'approved' && (
                             <button
                               type="button"
-                              onClick={() => onInspectListing(item)}
-                              className="h-8 px-2.5 rounded-lg bg-sky-500/20 border border-sky-400/40 text-sky-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                              onClick={() =>
+                                handleChangeListingStatus(item.id, 'sold')
+                              }
+                              className="h-8 px-2.5 rounded-lg bg-sky-500/20 border border-sky-400/40 text-sky-200 text-xs font-bold cursor-pointer"
+                            >
+                              تم البيع
+                            </button>
+                          )}
+                          {item.status !== 'rejected' && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleChangeListingStatus(item.id, 'rejected')
+                              }
+                              className="h-8 px-2.5 rounded-lg bg-amber-500/15 border border-amber-400/35 text-amber-200 text-xs font-bold cursor-pointer"
+                            >
+                              رفض
+                            </button>
+                          )}
+                          {item.is_hidden ? (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleHideListing(item.id, true)}
+                              className="h-8 px-2.5 rounded-lg bg-teal-500/20 border border-teal-400/40 text-teal-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              إعادة نشر
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleHideListing(item.id, false)}
+                              className="h-8 px-2.5 rounded-lg bg-slate-600/20 border border-slate-500/40 text-slate-300 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
                             >
                               <Eye className="w-3.5 h-3.5" />
-                              عرض
+                              إخفاء
                             </button>
-
-                            {item.status === 'approved' && (
-                              <button
-                                type="button"
-                                onClick={() => handleChangeListingStatus(item.id, 'sold')}
-                                className="h-8 px-2.5 rounded-lg bg-sky-600/20 border border-sky-400/30 text-sky-300 text-xs font-bold cursor-pointer"
-                              >
-                                تم البيع
-                              </button>
-                            )}
-
-                            {item.status === 'hidden' ? (
-                              <button
-                                type="button"
-                                onClick={() => handleChangeListingStatus(item.id, 'approved')}
-                                className="h-8 px-2.5 rounded-lg bg-teal-500/20 border border-teal-400/40 text-teal-200 text-xs font-bold cursor-pointer"
-                              >
-                                إعادة النشر
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleChangeListingStatus(item.id, 'hidden')}
-                                className="h-8 px-2.5 rounded-lg bg-white/10 text-slate-200 text-xs font-bold cursor-pointer"
-                              >
-                                إخفاء
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => setDeleteListingTarget(item)}
-                              className="h-8 px-2.5 rounded-lg bg-red-500/20 border border-red-400/40 text-red-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              حذف
-                            </button>
-                          </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onInspectListing(item)}
+                            className="h-8 px-2.5 rounded-lg bg-white/10 text-white text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            معاينة
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(item)}
+                            className="h-8 px-2.5 rounded-lg bg-blue-500/20 border border-blue-400/40 text-blue-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            تعديل
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteListing(item.id)}
+                            className="h-8 px-2.5 rounded-lg bg-red-500/15 border border-red-400/30 text-red-300 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            حذف
+                          </button>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            );
-          })()}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* SECTION 3: RECENTLY ADDED / PENDING APPROVAL (الخدمات المضافة حديثًا) */}
           {activeSection === 'pending' && (
@@ -1756,20 +2047,39 @@ export function AdminDashboard({
                   />
                   <label className="h-10 px-3 rounded-xl bg-sky-500/20 border border-sky-400/40 text-sky-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer shrink-0">
                     <ImagePlus className="w-4 h-4" />
-                    <span>رفع</span>
+                    <span>رفع عدة صور</span>
                     <input
                       type="file"
                       accept="image/*"
+                      multiple
                       className="hidden"
                       onChange={(e) =>
-                        handleUploadSingleImage(
-                          e.target.files?.[0],
-                          setSlideImage
-                        )
+                        handleUploadMultipleSliderImages(e.target.files)
                       }
                     />
                   </label>
                 </div>
+                {(slidePendingUrls.length > 0 || slideImage) && (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {(slidePendingUrls.length > 0 ? slidePendingUrls : [slideImage]).map((url, index) => (
+                      <button
+                        type="button"
+                        key={`${url}-${index}`}
+                        onClick={() => setSlideImage(url)}
+                        className={`relative aspect-video rounded-lg overflow-hidden border ${slideImage === url ? 'border-amber-400' : 'border-sky-400/20'}`}
+                      >
+                        <ProgressiveImage src={url} alt={`معاينة الشريحة ${index + 1}`} containerClassName="w-full h-full" className="object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input
+                  type="url"
+                  value={slideLinkUrl}
+                  onChange={(e) => setSlideLinkUrl(e.target.value)}
+                  placeholder="رابط اختياري عند الضغط على الشريحة"
+                  className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white placeholder:text-slate-400 text-xs"
+                />
                 <select
                   value={slideLinkCatId}
                   onChange={(e) => setSlideLinkCatId(e.target.value)}
@@ -1827,6 +2137,38 @@ export function AdminDashboard({
               </form>
 
               <div className="lg:col-span-7 space-y-3">
+                <div className="rounded-2xl bg-[#071636] border border-sky-400/25 p-4">
+                  <h3 className="text-sm font-extrabold text-white mb-3">إعدادات التشغيل التلقائي</h3>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={sliderAutoplayForm}
+                        onChange={(e) => setSliderAutoplayForm(e.target.checked)}
+                        className="accent-amber-400"
+                      />
+                      تشغيل تلقائي
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-slate-300">
+                      المدة بالثواني
+                      <input
+                        type="number"
+                        min={2}
+                        max={30}
+                        value={Math.round(Number(sliderIntervalForm) / 1000) || 5}
+                        onChange={(e) => setSliderIntervalForm(String(Math.max(2, Math.min(30, Number(e.target.value) || 2)) * 1000))}
+                        className="w-20 h-9 px-2 rounded-lg bg-[#040E24] border border-sky-400/30 text-white text-sm tabular-nums"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleSaveSliderSettings}
+                      className="h-9 px-4 rounded-lg bg-amber-400 text-[#051029] text-xs font-extrabold cursor-pointer"
+                    >
+                      حفظ الإعدادات
+                    </button>
+                  </div>
+                </div>
                 {sliders.map((s) => (
                   <div
                     key={s.id}
@@ -1853,6 +2195,30 @@ export function AdminDashboard({
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
+                        onClick={() => handleMoveSlider(s, -1)}
+                        title="تحريك لأعلى"
+                        className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-slate-300 cursor-pointer"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMoveSlider(s, 1)}
+                        title="تحريك لأسفل"
+                        className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-slate-300 cursor-pointer"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSlider(s)}
+                        title={s.is_active ? 'إخفاء الشريحة' : 'تفعيل الشريحة'}
+                        className={`w-9 h-9 rounded-lg flex items-center justify-center cursor-pointer ${s.is_active ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25' : 'bg-slate-500/15 text-slate-300 hover:bg-slate-500/25'}`}
+                      >
+                        {s.is_active ? <Eye className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => {
                           setEditingSlideId(s.id);
                           setSlideTitle(s.title);
@@ -1861,6 +2227,7 @@ export function AdminDashboard({
                           setSlideLinkCatId(
                             s.link_category_id ? String(s.link_category_id) : ''
                           );
+                          setSlideLinkUrl(s.link_url || '');
                           setSlideSort(String(s.sort_order));
                           setSlideActive(s.is_active);
                         }}
@@ -2856,314 +3223,62 @@ export function AdminDashboard({
         </div>
       </aside>
 
-      {/* ADD / EDIT LISTING MODAL */}
-      {addListingModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-2xl bg-[#071636] border border-amber-400/50 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-sky-400/20">
-              <h3 className="text-base sm:text-lg font-extrabold text-amber-300">
-                {editListingObj ? 'تعديل المنشور' : 'إضافة منشور جديد (منشور فوري)'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setAddListingModalOpen(false)}
-                className="w-8 h-8 rounded-lg text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* MODAL: إضافة منشور */}
+      {addModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={handleCloseAddModal}>
+          <div className="bg-[#0A1A3C] border border-sky-400/30 rounded-2xl w-full max-w-md max-h-[80vh] overflow-y-auto p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-extrabold text-white">إضافة منشور</h3>
+              <button type="button" onClick={handleCloseAddModal} className="w-7 h-7 rounded-lg text-slate-400 hover:text-white flex items-center justify-center"><X className="w-3.5 h-3.5" /></button>
             </div>
-
-            {formError && (
-              <div className="p-3 rounded-xl bg-red-950/70 border border-red-400/40 text-red-200 text-xs font-bold">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleSaveListingSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">اسم الدراجة أو العنوان *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formTitle}
-                    onChange={(e) => setFormTitle(e.target.value)}
-                    placeholder="مثلاً: هوندا سبيس 2023 نظيفة جداً"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">الماركة (اختياري)</label>
-                  <input
-                    type="text"
-                    value={formBrand}
-                    onChange={(e) => setFormBrand(e.target.value)}
-                    placeholder="مثلاً: هوندا، ياماها"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">القسم *</label>
-                  <select
-                    value={formCatId}
-                    onChange={(e) => setFormCatId(e.target.value)}
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name_ar}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">المحافظة *</label>
-                  <select
-                    value={formGov}
-                    onChange={(e) => setFormGov(e.target.value)}
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  >
-                    {IRAQI_GOVERNORATES.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">المنطقة / الحي</label>
-                  <input
-                    type="text"
-                    value={formArea}
-                    onChange={(e) => setFormArea(e.target.value)}
-                    placeholder="مثلاً: المنصور"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">سنة الصنع</label>
-                  <input
-                    type="number"
-                    value={formModelYear}
-                    onChange={(e) => setFormModelYear(e.target.value)}
-                    placeholder="2024"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">سعة المحرك (CC)</label>
-                  <input
-                    type="number"
-                    value={formEngineCc}
-                    onChange={(e) => setFormEngineCc(e.target.value)}
-                    placeholder="150"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">استطاعة المحرك (Watts)</label>
-                  <input
-                    type="number"
-                    value={formMotorWatts}
-                    onChange={(e) => setFormMotorWatts(e.target.value)}
-                    placeholder="2000"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">الحالة</label>
-                  <select
-                    value={formCondition}
-                    onChange={(e) => setFormCondition(e.target.value as 'new' | 'used')}
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                  >
-                    <option value="used">مستعمل</option>
-                    <option value="new">جديد (زيرو)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">السعر بالعراقي (د.ع) *</label>
-                  <input
-                    type="number"
-                    required
-                    value={formPrice}
-                    onChange={(e) => setFormPrice(e.target.value)}
-                    placeholder="5500000"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">رقم الهاتف *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formPhone}
-                    onChange={(e) => setFormPhone(e.target.value)}
-                    placeholder="077xxxxxxxx"
-                    className="w-full h-10 px-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs tabular-nums"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="formNegotiable"
-                  checked={formNegotiable}
-                  onChange={(e) => setFormNegotiable(e.target.checked)}
-                  className="accent-amber-400"
-                />
-                <label htmlFor="formNegotiable" className="text-xs font-bold text-slate-200 cursor-pointer">
-                  السعر قابل للتفاوض
-                </label>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">الوصف التفصيلي *</label>
-                <textarea
-                  rows={3}
-                  required
-                  value={formDesc}
-                  onChange={(e) => setFormDesc(e.target.value)}
-                  placeholder="اكتب تفاصيل الدراجة، الحالة، المواصفات والملحقات..."
-                  className="w-full p-3 rounded-xl bg-[#040E24] border border-sky-400/30 text-white text-xs"
-                />
-              </div>
-
-              {/* Images Uploader */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-300">صور المنشور (حتى 10 صور)</label>
-                  <label className="h-8 px-3 rounded-lg bg-sky-500/20 border border-sky-400/40 text-sky-200 text-xs font-bold inline-flex items-center gap-1 cursor-pointer">
-                    <ImagePlus className="w-3.5 h-3.5" />
-                    <span>إضافة صور</span>
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const files = Array.from(e.target.files || []);
-                        if (files.length === 0) return;
-                        setUploadingImg(true);
-                        try {
-                          const urls = await uploadImagesApi(files);
-                          setFormImages((prev) => [
-                            ...prev,
-                            ...urls.map((u, idx) => ({
-                              url: u,
-                              isCover: prev.length === 0 && idx === 0,
-                            })),
-                          ]);
-                        } catch (err: any) {
-                          notify(err?.message || 'فشل رفع الصور.');
-                        } finally {
-                          setUploadingImg(false);
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
-
-                {formImages.length > 0 && (
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 pt-1">
-                    {formImages.map((img, idx) => (
-                      <div
-                        key={idx}
-                        className={`relative rounded-xl overflow-hidden aspect-square border-2 bg-[#040E24] ${
-                          img.isCover ? 'border-amber-400' : 'border-sky-400/30'
-                        }`}
-                      >
-                        <ProgressiveImage src={img.url} alt={`صورة ${idx + 1}`} containerClassName="w-full h-full" />
-                        <div className="absolute inset-x-0 bottom-0 bg-black/70 p-1 flex items-center justify-between">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setFormImages((prev) =>
-                                prev.map((im, i) => ({ ...im, isCover: i === idx }))
-                              )
-                            }
-                            className={`text-[10px] font-bold px-1 rounded ${
-                              img.isCover ? 'bg-amber-400 text-[#051029]' : 'text-white'
-                            }`}
-                          >
-                            {img.isCover ? 'الغلاف' : 'اجعله غلافاً'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setFormImages((prev) => prev.filter((_, i) => i !== idx))}
-                            className="text-red-400 hover:text-red-300 p-0.5"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-sky-400/20">
-                <button
-                  type="button"
-                  onClick={() => setAddListingModalOpen(false)}
-                  className="h-10 px-4 rounded-xl bg-white/10 text-slate-200 text-xs font-bold cursor-pointer"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  disabled={formSaving || uploadingImg}
-                  className="h-10 px-6 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#051029] text-xs font-extrabold cursor-pointer disabled:opacity-50"
-                >
-                  {formSaving ? 'جاري الحفظ...' : editListingObj ? 'حفظ التعديلات' : 'نشر المنشور فوراً'}
-                </button>
-              </div>
+            <form onSubmit={(e) => { e.preventDefault(); handleCreateAdminListing(); }} className="space-y-2">
+              <label className="text-xs font-bold text-slate-300 block">العنوان</label>
+              <input type="text" value={addForm.title} onChange={(e) => handleAddFormChange('title', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">القسم</label>
+              <select value={addForm.category_id ?? ''} onChange={(e) => handleAddFormChange('category_id', e.target.value ? Number(e.target.value) : null)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80"><option value="">اختر القسم</option>{categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name_ar}</option>)}</select>
+              <label className="text-xs font-bold text-slate-300 block mt-2">المحافظة</label>
+              <select value={addForm.governorate} onChange={(e) => handleAddFormChange('governorate', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80"><option value="">اختر المحافظة</option>{IRAQI_GOVERNORATES.map((gov) => <option key={gov} value={gov}>{gov}</option>)}</select>
+              <label className="text-xs font-bold text-slate-300 block mt-2">السعر (د.ع)</label>
+              <input type="number" value={addForm.price_iqd} onChange={(e) => handleAddFormChange('price_iqd', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">رقم الهاتف</label>
+              <input type="tel" value={addForm.phone} onChange={(e) => handleAddFormChange('phone', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">الوصف</label>
+              <textarea value={addForm.description} onChange={(e) => handleAddFormChange('description', e.target.value)} rows={2} className="w-full h-16 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">الصور</label>
+              <div className="flex gap-2">{addForm.images.map((img, i) => <div key={i} className="relative"><img src={img.url} className="w-12 h-12 rounded object-cover" />{addForm.images.length > 1 && <button type="button" onClick={() => handleAddFormChange('images', addForm.images.filter((_, j) => j !== i))} className="absolute top-0 right-0 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center"><X className="w-2 h-2" /></button>}</div>)}<button type="button" onClick={handleOpenAddImagePicker} className="w-12 h-12 rounded border-2 border-dashed border-sky-400/40 text-sky-400 text-[10px] flex flex-col items-center justify-center hover:border-sky-400"><Plus className="w-2.5 h-2.5" /><span>صورة</span></button></div>
+              <button type="submit" disabled={isSubmitting} className="w-full h-8 rounded-lg bg-[#F96B11] hover:bg-[#F96B11]/90 text-white text-xs font-bold flex items-center justify-center gap-1 cursor-pointer disabled:opacity-60 mt-3">{isSubmitting ? (<><Loader2 className="w-3 h-3" /> نشر...</>) : (<><Plus className="w-3 h-3" /><span>نشر</span></>)}</button>
             </form>
+            <div className="mt-2 flex justify-end"><button type="button" onClick={handleCloseAddModal} className="h-7 px-2 rounded-lg text-slate-300 hover:text-white text-xs">إلغاء</button></div>
           </div>
         </div>
       )}
 
-      {/* DELETE CONFIRMATION MODAL */}
-      {deleteListingTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#071636] border border-red-400/50 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 text-red-400">
-              <AlertTriangle className="w-6 h-6 shrink-0" />
-              <h3 className="text-base font-extrabold text-white">تأكيد حذف المنشور</h3>
+      {/* MODAL: تعديل منشور */}
+      {editModalOpen && editForm && editingListing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={handleCloseEditModal}>
+          <div className="bg-[#0A1A3C] border border-sky-400/30 rounded-2xl w-full max-w-md max-h-[80vh] overflow-y-auto p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-extrabold text-white">تعديل المنشور</h3>
+              <button type="button" onClick={handleCloseEditModal} className="w-7 h-7 rounded-lg text-slate-400 hover:text-white flex items-center justify-center"><X className="w-3.5 h-3.5" /></button>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              هل أنت متأكد من حذف المنشور <span className="text-amber-300 font-bold">«{deleteListingTarget.title}»</span> نهائياً من قاعدة البيانات وتطبيق دراجتي؟
-            </p>
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeleteListingTarget(null)}
-                className="h-10 px-4 rounded-xl bg-white/10 text-slate-200 text-xs font-bold cursor-pointer"
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const id = deleteListingTarget.id;
-                  setDeleteListingTarget(null);
-                  await handleDeleteListing(id);
-                }}
-                className="h-10 px-5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-xs font-extrabold cursor-pointer"
-              >
-                حذف نهائي
-              </button>
-            </div>
+            <form onSubmit={(e) => { e.preventDefault(); handleSaveEditListing(); }} className="space-y-2">
+              <label className="text-xs font-bold text-slate-300 block">العنوان</label>
+              <input type="text" value={editForm.title} onChange={(e) => handleEditFormChange('title', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">القسم</label>
+              <select value={editForm.category_id ?? ''} onChange={(e) => handleEditFormChange('category_id', e.target.value ? Number(e.target.value) : null)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80"><option value="">اختر القسم</option>{categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name_ar}</option>)}</select>
+              <label className="text-xs font-bold text-slate-300 block mt-2">المحافظة</label>
+              <select value={editForm.governorate} onChange={(e) => handleEditFormChange('governorate', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80"><option value="">اختر المحافظة</option>{IRAQI_GOVERNORATES.map((gov) => <option key={gov} value={gov}>{gov}</option>)}</select>
+              <label className="text-xs font-bold text-slate-300 block mt-2">السعر (د.ع)</label>
+              <input type="number" value={editForm.price_iqd} onChange={(e) => handleEditFormChange('price_iqd', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">رقم الهاتف</label>
+              <input type="tel" value={editForm.phone} onChange={(e) => handleEditFormChange('phone', e.target.value)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">الوصف</label>
+              <textarea value={editForm.description} onChange={(e) => handleEditFormChange('description', e.target.value)} rows={2} className="w-full h-16 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80" />
+              <label className="text-xs font-bold text-slate-300 block mt-2">حالة النشر</label>
+              <select value={editForm.status} onChange={(e) => handleEditFormChange('status', e.target.value as ListingStatus)} className="w-full h-8 pr-2 pl-2 rounded-lg bg-[#081635] border border-sky-400/40 text-white text-xs focus:border-amber-400/80"><option value="approved">منشور</option><option value="sold">تم البيع</option><option value="pending">قيد المراجعة</option><option value="rejected">مرفوض</option></select>
+              <button type="submit" disabled={isSubmitting} className="w-full h-8 rounded-lg bg-[#F96B11] hover:bg-[#F96B11]/90 text-white text-xs font-bold flex items-center justify-center gap-1 cursor-pointer disabled:opacity-60 mt-3">{isSubmitting ? (<><Loader2 className="w-3 h-3" /> حفظ...</>) : (<><SaveIcon /><span>حفظ</span></>)}</button>
+            </form>
+            <div className="mt-2 flex justify-end"><button type="button" onClick={handleCloseEditModal} className="h-7 px-2 rounded-lg text-slate-300 hover:text-white text-xs">إلغاء</button></div>
           </div>
         </div>
       )}

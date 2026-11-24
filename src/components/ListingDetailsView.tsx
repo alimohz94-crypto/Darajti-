@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   AlertTriangle,
   ArrowRight,
@@ -34,6 +35,8 @@ import {
 } from '../types';
 import {
   deleteListingApi,
+  getListingContactUrl,
+  resolveListingContactTarget,
   getLastKnownServerOnline,
   getOwnerTokenForListing,
   saveOwnership,
@@ -96,7 +99,7 @@ export function ListingDetailsView({
   const [editNegotiable, setEditNegotiable] = useState(listing.negotiable);
   const [editGov, setEditGov] = useState(listing.governorate);
   const [editArea, setEditArea] = useState(listing.area);
-  const [editPhone, setEditPhone] = useState(listing.phone);
+  const [editPhone, setEditPhone] = useState(listing.phone || '');
   const [editDesc, setEditDesc] = useState(listing.description);
   const [editKeywords, setEditKeywords] = useState(listing.keywords || '');
   const [editSaving, setEditSaving] = useState(false);
@@ -301,13 +304,48 @@ export function ListingDetailsView({
     setDragOffset(0);
   };
 
-  const whatsappUrl = `https://wa.me/${toWhatsAppInternational(
-    listing.phone
-  )}?text=${encodeURIComponent(
-    `مرحباً، أستفسر عن إعلانك في دراجتي: ${listing.title} (${formatPriceIQD(
-      listing.price_iqd
-    )} دينار عراقي)`
-  )}`;
+  const whatsappUrl = listing.phone
+    ? `https://wa.me/${toWhatsAppInternational(
+        listing.phone
+      )}?text=${encodeURIComponent(
+        `مرحباً، أستفسر عن إعلانك في دراجتي: ${listing.title} (${formatPriceIQD(
+          listing.price_iqd
+        )} دينار عراقي)`
+      )}`
+    : getListingContactUrl(listing.id, 'whatsapp');
+  const callUrl = listing.phone
+    ? `tel:${listing.phone}`
+    : getListingContactUrl(listing.id, 'call');
+
+  const handlePublicContact = async (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    channel: 'call' | 'whatsapp'
+  ) => {
+    if (listing.phone) return;
+    event.preventDefault();
+
+    const isNative = Capacitor.isNativePlatform();
+    const popup =
+      channel === 'whatsapp' && !isNative
+        ? window.open('', '_blank')
+        : null;
+
+    try {
+      const target = await resolveListingContactTarget(listing.id, channel);
+      if (popup) {
+        popup.opener = null;
+        popup.location.replace(target);
+      } else {
+        window.location.assign(target);
+      }
+    } catch (error) {
+      popup?.close();
+      setShareToast(
+        error instanceof Error ? error.message : 'تعذر فتح وسيلة التواصل.'
+      );
+      window.setTimeout(() => setShareToast(null), 3000);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#F4F6F9] pb-28">
@@ -672,17 +710,19 @@ export function ListingDetailsView({
               {/* Direct Contact Actions */}
               <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <a
-                  href={`tel:${listing.phone}`}
+                  href={callUrl}
+                  onClick={(event) => void handlePublicContact(event, 'call')}
                   className="h-12 rounded-xl bg-[#0D2545] hover:bg-[#163661] text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors"
                 >
                   <Phone className="w-4 h-4" />
-                  <span>اتصال ({listing.phone})</span>
+                  <span>{listing.phone ? `اتصال (${listing.phone})` : 'اتصال'}</span>
                 </a>
 
                 <a
                   href={whatsappUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={(event) => void handlePublicContact(event, 'whatsapp')}
                   className="h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors"
                 >
                   <MessageCircle className="w-4 h-4" />
@@ -770,7 +810,7 @@ export function ListingDetailsView({
                           setEditNegotiable(listing.negotiable);
                           setEditGov(listing.governorate);
                           setEditArea(listing.area);
-                          setEditPhone(listing.phone);
+                          setEditPhone(listing.phone || '');
                           setEditDesc(listing.description);
                           setEditKeywords(listing.keywords || '');
                           setEditing(true);

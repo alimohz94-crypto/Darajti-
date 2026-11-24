@@ -25,16 +25,24 @@ import {
   savePublicListingsOffline,
   savePublicSlidersOffline,
 } from './offlineStore';
+import {
+  buildPublicContactEndpoint,
+  type PublicContactChannel,
+  validatePublicContactTarget,
+} from './publicContact';
 
 const PREFS_GOV_KEY = 'darajati_gov_pref';
 const PREFS_HIDE_DEMO_KEY = 'darajati_hide_demo';
 const FAVORITES_KEY = 'darajati_favorites';
+const FAVORITES_PENDING_KEY = 'darajati_favorites_pending';
 const DRAFT_KEY = 'darajati_add_draft';
 const MY_POSTS_KEY = 'darajati_my_posts';
 const VISIT_SESSION_KEY = 'darajati_visit_session';
 
 // CSRF token stored strictly in memory (never in localStorage or sessionStorage!)
 let adminCsrfToken = '';
+let favoritesServerInitialized = false;
+let favoritesSyncPromise: Promise<number[]> | null = null;
 
 export function clearAdminCsrfToken(): void {
   adminCsrfToken = '';
@@ -153,7 +161,31 @@ export class ApiError extends Error {
   }
 }
 
+function resolveApiUrl(url: string): string {
+  const apiBaseUrl = String(import.meta.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  return /^https?:\/\//i.test(url) || !apiBaseUrl
+    ? url
+    : `${apiBaseUrl}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
+export function getListingContactUrl(
+  id: number,
+  channel: PublicContactChannel
+): string {
+  return resolveApiUrl(buildPublicContactEndpoint(id, channel));
+}
+
+export async function resolveListingContactTarget(
+  id: number,
+  channel: PublicContactChannel
+): Promise<string> {
+  const endpoint = `${buildPublicContactEndpoint(id, channel)}&format=json`;
+  const response = await requestJson<{ url: string }>(endpoint);
+  return validatePublicContactTarget(channel, response.url);
+}
+
 async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const resolvedUrl = resolveApiUrl(url);
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     setServerConnectivityState(false);
     throw new ApiError(
@@ -173,7 +205,7 @@ async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T
 
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetch(resolvedUrl, {
       ...options,
       headers,
       credentials: 'include',
@@ -336,6 +368,10 @@ export async function fetchSliders(): Promise<SliderItem[]> {
     }
     throw err;
   }
+}
+
+export async function fetchSliderSettings(): Promise<{ autoplay: boolean; intervalMs: number }> {
+  return requestJson('/api/slider-settings');
 }
 
 export interface ListingsQuery {
@@ -503,7 +539,7 @@ export function verifyListingOwnerCode(
 
 export function updateListingStatus(
   id: number,
-  status: 'sold' | 'approved' | 'pending' | 'rejected' | 'hidden',
+  status: 'sold' | 'approved' | 'pending' | 'rejected',
   auth: { ownerToken?: string } = {}
 ): Promise<{ listing: Listing }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -513,46 +549,13 @@ export function updateListingStatus(
     headers,
     body: JSON.stringify({ status }),
   }).then((res: any) => {
-    if (status === 'pending' || status === 'rejected' || status === 'hidden') {
+    if (status === 'pending' || status === 'rejected') {
       removeListingFromOfflineCache(id);
-    } else if (res?.listing && status === 'approved') {
+    } else if (res?.listing) {
       savePublicListingDetailOffline(res.listing);
     }
     return res;
   });
-}
-
-export async function createAdminListingApi(payload: {
-  title: string;
-  brand: string;
-  category_id: number;
-  governorate: string;
-  area: string;
-  model_year: number | null;
-  engine_cc?: number | null;
-  motor_watts?: number | null;
-  condition: 'new' | 'used';
-  price_iqd: number;
-  negotiable: boolean;
-  phone: string;
-  description: string;
-  keywords?: string;
-  images: ListingImage[];
-  video_url: string | null;
-  status?: string;
-}): Promise<{ listing: Listing; ownerToken: string; ownerCode: string }> {
-  if (!(await checkServerReachable())) {
-    throw new ApiError('إضافة دراجة تحتاج اتصالًا بالإنترنت', 0, undefined, true);
-  }
-  const res = await requestJson<{ listing: Listing; ownerToken: string; ownerCode: string }>('/api/admin/listings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (res?.listing && res.listing.status === 'approved') {
-    savePublicListingDetailOffline(res.listing);
-  }
-  return res;
 }
 
 export function updateListingFields(
@@ -663,6 +666,53 @@ export function fetchAdminListings(status = 'all'): Promise<Listing[]> {
   return requestJson(`/api/admin/listings?status=${encodeURIComponent(status)}`);
 }
 
+/** إخفاء أو إعادة نشر منشور (مدير فقط) */
+export function toggleHideListingApi(
+  id: number,
+  isHidden: boolean
+): Promise<{ listing: Listing; is_hidden: boolean }> {
+  return requestJson(`/api/admin/listings/${id}/toggle-hide`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_hidden: isHidden }),
+  });
+}
+
+/** إنشاء منشور من قبل المدير ونشره مباشرة (بدون انتظار موافقة) */
+export async function createAdminListingApi(payload: {
+  title: string;
+  brand?: string;
+  category_id: number;
+  governorate: string;
+  area: string;
+  model_year: number | null;
+  engine_cc?: number | null;
+  motor_watts?: number | null;
+  condition: 'new' | 'used';
+  price_iqd: number;
+  negotiable: boolean;
+  phone: string;
+  description: string;
+  keywords?: string;
+  images: ListingImage[];
+  video_url: string | null;
+}): Promise<{ listing: Listing }> {
+  if (!(await checkServerReachable())) {
+    throw new ApiError('إضافة منشور تحتاج اتصالًا بالإنترنت', 0, undefined, true);
+  }
+  // يُنشأ المنشور أولاً بحالة 'pending' ثم يُعتمد فورًا بصلاحية الإدارة
+  const created = await requestJson<{ listing: Listing; ownerToken: string; ownerCode: string }>(
+    '/api/listings',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+  await updateListingStatus(created.listing.id, 'approved');
+  return { listing: created.listing };
+}
+
 export function deleteAllDemoListingsApi(): Promise<{ deleted: number }> {
   return requestJson('/api/admin/demo-listings', {
     method: 'DELETE',
@@ -713,6 +763,7 @@ export function createSliderApi(payload: {
   subtitle: string;
   image_url: string;
   link_category_id: number | null;
+  link_url: string;
   sort_order: number;
   is_active: boolean;
 }): Promise<SliderItem> {
@@ -939,9 +990,22 @@ export function setSavedHideDemo(hide: boolean): void {
 export function getFavorites(): number[] {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter(
+      (id): id is number => Number.isSafeInteger(id) && id > 0
+    ))];
   } catch {
     return [];
+  }
+}
+
+function saveFavoritesLocal(favorites: number[]): void {
+  try {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+  } catch {
+    // Keep the current in-memory favorites if local storage is unavailable.
   }
 }
 
@@ -949,12 +1013,118 @@ export function toggleFavoriteLocal(id: number): number[] {
   const current = getFavorites();
   const exists = current.includes(id);
   const next = exists ? current.filter((x) => x !== id) : [...current, id];
-  try {
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
+  saveFavoritesLocal(next);
   return next;
+}
+
+interface PendingFavoriteChange {
+  listingId: number;
+  favorite: boolean;
+}
+
+function readPendingFavoriteChanges(): PendingFavoriteChange[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(FAVORITES_PENDING_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((change): change is PendingFavoriteChange =>
+      Number.isSafeInteger(change?.listingId) &&
+      change.listingId > 0 &&
+      typeof change.favorite === 'boolean'
+    );
+  } catch {
+    return [];
+  }
+}
+
+function savePendingFavoriteChanges(changes: PendingFavoriteChange[]): void {
+  try {
+    if (changes.length === 0) localStorage.removeItem(FAVORITES_PENDING_KEY);
+    else localStorage.setItem(FAVORITES_PENDING_KEY, JSON.stringify(changes));
+  } catch {
+    // Keep local favorites available when storage is constrained.
+  }
+}
+
+function queueFavoriteChange(change: PendingFavoriteChange): void {
+  const changes = readPendingFavoriteChanges().filter(
+    (pending) => pending.listingId !== change.listingId
+  );
+  changes.push(change);
+  savePendingFavoriteChanges(changes);
+}
+
+function clearPendingFavoriteChange(listingId: number): void {
+  savePendingFavoriteChanges(
+    readPendingFavoriteChanges().filter((change) => change.listingId !== listingId)
+  );
+}
+
+export async function syncFavoritesToServer(
+  localFavorites: number[] = getFavorites()
+): Promise<number[]> {
+  if (favoritesSyncPromise) return favoritesSyncPromise;
+
+  favoritesSyncPromise = (async () => {
+    const response = await requestJson<{ favorites: unknown }>('/api/favorites/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favorites: [...new Set(localFavorites)] }),
+    });
+    if (!Array.isArray(response.favorites)) {
+      throw new ApiError('تعذرت مزامنة المفضلة.', 500);
+    }
+
+    favoritesServerInitialized = true;
+    const favorites = new Set(
+      response.favorites.filter(
+        (id): id is number => Number.isSafeInteger(id) && id > 0
+      )
+    );
+    const pending = readPendingFavoriteChanges();
+    for (const change of pending) {
+      try {
+        await requestJson<{ ok: boolean }>(
+          `/api/favorites/${change.listingId}`,
+          { method: change.favorite ? 'PUT' : 'DELETE' }
+        );
+        if (change.favorite) favorites.add(change.listingId);
+        else favorites.delete(change.listingId);
+        clearPendingFavoriteChange(change.listingId);
+      } catch {
+        if (change.favorite) favorites.add(change.listingId);
+        else favorites.delete(change.listingId);
+      }
+    }
+
+    const result = [...favorites];
+    saveFavoritesLocal(result);
+    return result;
+  })();
+
+  try {
+    return await favoritesSyncPromise;
+  } finally {
+    favoritesSyncPromise = null;
+  }
+}
+
+export async function setFavoriteOnServer(
+  listingId: number,
+  favorite: boolean
+): Promise<void> {
+  try {
+    if (!favoritesServerInitialized) {
+      await syncFavoritesToServer();
+    }
+    await requestJson<{ ok: boolean }>(
+      `/api/favorites/${listingId}`,
+      { method: favorite ? 'PUT' : 'DELETE' }
+    );
+    clearPendingFavoriteChange(listingId);
+  } catch (error) {
+    queueFavoriteChange({ listingId, favorite });
+    throw error;
+  }
 }
 
 export function loadAddDraft(): AddListingDraft | null {

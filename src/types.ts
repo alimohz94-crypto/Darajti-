@@ -19,7 +19,7 @@ export const IRAQI_GOVERNORATES = [
   'القادسية',
 ] as const;
 
-export type ListingStatus = 'pending' | 'approved' | 'sold' | 'rejected' | 'hidden';
+export type ListingStatus = 'pending' | 'approved' | 'sold' | 'rejected';
 export type ListingCondition = 'new' | 'used';
 
 export interface Category {
@@ -53,13 +53,14 @@ export interface Listing {
   condition: ListingCondition;
   price_iqd: number;
   negotiable: boolean;
-  phone: string;
+  phone?: string;
   description: string;
   keywords: string;
   images: ListingImage[];
   video_url: string | null;
   status: ListingStatus;
   is_demo: boolean;
+  is_hidden: boolean;
   created_at: string;
   updated_at: string;
   matchTier?: 'exact' | 'synonym' | 'fuzzy';
@@ -170,6 +171,7 @@ export interface SliderItem {
   subtitle: string;
   image_url: string;
   link_category_id: number | null;
+  link_url?: string;
   sort_order: number;
   is_active: boolean;
 }

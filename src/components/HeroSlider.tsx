@@ -6,9 +6,13 @@ import { ProgressiveImage } from './BrandLogo';
 export function HeroSlider({
   slides,
   onSlideClick,
+  autoplay = true,
+  intervalMs = 5500,
 }: {
   slides: SliderItem[];
   onSlideClick?: (slide: SliderItem) => void;
+  autoplay?: boolean;
+  intervalMs?: number;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
@@ -26,12 +30,12 @@ export function HeroSlider({
   }, [count, activeIndex]);
 
   useEffect(() => {
-    if (count <= 1 || isDragging) return;
+    if (!autoplay || count <= 1 || isDragging) return;
     const timer = window.setInterval(() => {
       setActiveIndex((prev) => (prev + 1) % count);
-    }, 5500);
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [count, isDragging]);
+  }, [count, isDragging, autoplay, intervalMs]);
 
   if (count === 0) return null;
 
@@ -99,7 +103,7 @@ export function HeroSlider({
                 onSlideClick(slide);
               }
             }}
-            className={`relative w-full shrink-0 aspect-[16/9] sm:aspect-[21/9] max-h-[340px] ${
+            className={`relative w-full h-[170px] sm:h-[220px] lg:h-[280px] shrink-0 ${
               slide.link_category_id ? 'cursor-pointer' : ''
             }`}
           >
@@ -115,14 +119,14 @@ export function HeroSlider({
               aria-hidden="true"
               className="absolute inset-0 bg-gradient-to-l from-[#0D2545]/85 via-[#0D2545]/45 to-transparent"
             />
-            <div className="absolute inset-y-0 right-0 flex flex-col justify-center px-5 sm:px-10 max-w-[68%] sm:max-w-lg text-white">
-              <h2 className="text-xl sm:text-3xl lg:text-4xl font-extrabold leading-tight tracking-tight text-balance drop-shadow-sm">
+            <div className="absolute inset-y-0 right-0 flex flex-col justify-center px-3.5 sm:px-7 lg:px-10 max-w-[72%] sm:max-w-[70%] lg:max-w-lg text-white">
+              <h2 className="text-base sm:text-xl lg:text-2xl font-extrabold leading-tight tracking-tight text-balance drop-shadow-sm line-clamp-2">
                 {slide.title}
               </h2>
               {/* Signature orange curved underline matching reference */}
               <svg
                 viewBox="0 0 160 12"
-                className="w-28 sm:w-40 h-3 mt-1.5"
+                className="w-20 sm:w-28 lg:w-36 h-2 sm:h-2.5 mt-1"
                 fill="none"
                 aria-hidden="true"
               >
@@ -134,7 +138,7 @@ export function HeroSlider({
                 />
               </svg>
               {slide.subtitle && (
-                <p className="mt-2 text-xs sm:text-sm text-slate-100/95 leading-relaxed line-clamp-2">
+                <p className="mt-1.5 text-[10px] sm:text-xs lg:text-sm text-slate-100/95 leading-relaxed line-clamp-2">
                   {slide.subtitle}
                 </p>
               )}
@@ -153,9 +157,9 @@ export function HeroSlider({
               goTo(activeIndex - 1);
             }}
             aria-label="الشريحة السابقة"
-            className="hidden sm:flex absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/35 hover:bg-black/55 text-white items-center justify-center backdrop-blur-sm transition-colors cursor-pointer"
+            className="hidden sm:flex absolute right-2 lg:right-3 top-1/2 -translate-y-1/2 w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-black/35 hover:bg-black/55 text-white items-center justify-center backdrop-blur-sm transition-colors cursor-pointer"
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4 lg:w-5 lg:h-5" />
           </button>
           <button
             type="button"
@@ -164,16 +168,16 @@ export function HeroSlider({
               goTo(activeIndex + 1);
             }}
             aria-label="الشريحة التالية"
-            className="hidden sm:flex absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/35 hover:bg-black/55 text-white items-center justify-center backdrop-blur-sm transition-colors cursor-pointer"
+            className="hidden sm:flex absolute left-2 lg:left-3 top-1/2 -translate-y-1/2 w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-black/35 hover:bg-black/55 text-white items-center justify-center backdrop-blur-sm transition-colors cursor-pointer"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-4 h-4 lg:w-5 lg:h-5" />
           </button>
         </>
       )}
 
       {/* Navigation dots inside the slider frame */}
       {count > 1 && (
-        <div className="absolute bottom-3 inset-x-0 flex items-center justify-center gap-1.5 z-10">
+        <div className="absolute bottom-2 lg:bottom-3 inset-x-0 flex items-center justify-center gap-1.5 z-10">
           {slides.map((s, idx) => (
             <button
               key={s.id}
