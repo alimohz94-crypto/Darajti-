@@ -2,8 +2,27 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
+import { MEDIA_RUNTIME_CACHING } from './pwa/mediaCaching.ts';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function copyDirectory(sourceDir: string, destinationDir: string): void {
+  fs.mkdirSync(destinationDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const destinationPath = path.join(destinationDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectory(sourcePath, destinationPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(sourcePath, destinationPath);
+    } else {
+      throw new Error(`Unsupported asset entry: ${sourcePath}`);
+    }
+  }
+}
 
 export default defineConfig(({command}) => {
   const isDevServe = command === 'serve';
@@ -27,24 +46,8 @@ export default defineConfig(({command}) => {
       urlPattern: /\/api\//i,
       handler: 'NetworkOnly',
     },
-    // Publicly published uploaded images ONLY (server marks pending/rejected with X-Darajati-Media-Scope: private)
-    {
-      urlPattern: /^\/uploads\/images\//i,
-      handler: 'CacheFirst',
-      options: {
-        cacheName: 'darajati-public-images',
-        expiration: {
-          maxEntries: 250,
-          maxAgeSeconds: 60 * 60 * 24 * 30,
-        },
-        cacheableResponse: {
-          statuses: [200],
-          headers: {
-            'X-Darajati-Media-Scope': 'public',
-          },
-        },
-      },
-    },
+    // Media visibility can change; always ask Express to re-authorize it.
+    MEDIA_RUNTIME_CACHING,
     // Bundled/local bike & category images
     {
       urlPattern: /^\/(src\/assets\/images|assets)\//i,
@@ -191,7 +194,7 @@ export default defineConfig(({command}) => {
           const srcAssets = path.resolve(__dirname, 'src/assets');
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
-            fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
+            copyDirectory(srcAssets, distAssets);
           }
         },
       },
